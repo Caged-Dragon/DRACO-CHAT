@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from './AuthContext.jsx';
 import { DEFAULT_THEME, computeGradient } from '../theme/fields.js';
 
@@ -57,7 +58,8 @@ export function ThemeProvider({ children }) {
     return { error };
   }
 
-  async function uploadWallpaper(file) {
+  async function uploadWallpaper(rawFile) {
+    const file = await compressImage(rawFile, { maxDim: 1920, quality: 0.8 });
     const path = `${user.id}/global-${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('chat-wallpapers')

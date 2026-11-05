@@ -7,14 +7,14 @@
   --panel: #ffffff;
   --panel-alt: #f3eefc;
   --border: #e6def7;
-  --red: #ef4444;
+  --red: #dc2626;
   --orange: #f97316;
-  --purple: #8b5cf6;
-  --accent-from: #ef4444;
-  --accent-to: #8b5cf6;
-  --gradient: linear-gradient(135deg, #ef4444 0%, #f97316 50%, #8b5cf6 100%);
+  --purple: #7c3aed;
+  --accent-from: #dc2626;
+  --accent-to: #7c3aed;
+  --gradient: linear-gradient(135deg, #dc2626 0%, #d4400d 50%, #7c3aed 100%);
   --text: #241a3d;
-  --text-dim: #7c718f;
+  --text-dim: #6b6080;
   /* v3 customizable theme variables — sensible defaults matching the
      look above; overridden globally by ThemeContext and, per chat, by
      ChatWindow's inline style (which only sets the keys that chat has
@@ -347,7 +347,9 @@ body {
 }
 
 /* --- Friend requests --- */
+.friend-requests h2,
 .friend-requests h3,
+.friends-list h2,
 .friends-list h3 {
   margin: 0 0 8px;
   font-size: 12px;
@@ -639,151 +641,6 @@ body {
 }
 
 /* ============================================================
-   MOBILE LAYOUT (phones / narrow tablets)
-   Desktop keeps the sidebar + chat side by side. On mobile,
-   only one screen shows at a time — the friends list, or a
-   full-screen chat with a back button — like a typical
-   messaging app.
-   ============================================================ */
-@media (max-width: 768px) {
-  .center-screen {
-    padding: 16px;
-  }
-
-  .auth-card {
-    width: 100%;
-    max-width: 340px;
-  }
-
-  .app-shell {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .sidebar {
-    width: 100%;
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    transition: transform 0.25s ease;
-  }
-
-  .chat-area {
-    width: 100%;
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    transform: translateX(100%);
-    transition: transform 0.25s ease;
-  }
-
-  /* Dashboard adds "chat-open" to .app-shell once a friend is selected */
-  .app-shell.chat-open .sidebar {
-    transform: translateX(-100%);
-  }
-
-  .app-shell.chat-open .chat-area {
-    transform: translateX(0);
-  }
-
-  .back-btn {
-    display: inline-flex;
-  }
-
-  /* Slightly larger tap targets and inputs on touch screens */
-  .friends-list li,
-  .friend-requests li,
-  .search-results li {
-    padding: 12px 14px;
-  }
-
-  .chat-input input {
-    font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
-  }
-
-  .bubble {
-    max-width: 78%;
-  }
-
-  .sidebar-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  /* Chat header now packs an avatar + name + 4 icon buttons — give
-     everything less room so it fits on a phone screen instead of
-     overflowing or wrapping badly. */
-  .chat-header {
-    padding: 10px 12px;
-    gap: 6px;
-  }
-
-  .chat-settings-btn {
-    font-size: 15px;
-    padding: 4px 3px;
-  }
-
-  .back-btn {
-    font-size: 18px;
-  }
-
-  .chat-header-name {
-    font-size: 14px;
-  }
-
-  .sidebar-header-actions {
-    gap: 4px;
-  }
-
-  .sidebar-header-actions .settings-btn,
-  .sidebar-header-actions .logout-btn {
-    padding: 5px 8px;
-    font-size: 11px;
-  }
-
-  .message-image {
-    max-width: 65vw;
-    max-height: 220px;
-  }
-
-  .emoji-picker {
-    left: 8px;
-    right: 8px;
-    bottom: 62px;
-    grid-template-columns: repeat(6, 1fr);
-  }
-
-  .bubble-hover-actions,
-  .reaction-picker {
-    transform: scale(0.95);
-  }
-
-  .reply-preview,
-  .chat-search-bar {
-    padding: 8px 12px;
-  }
-
-  .reply-preview-text {
-    max-width: 180px;
-  }
-
-  .chat-input {
-    padding: 10px 12px;
-    gap: 6px;
-  }
-
-  .chat-input input {
-    padding: 9px 12px;
-    font-size: 14px;
-  }
-
-  .chat-input button[type="submit"] {
-    padding: 9px 14px;
-    font-size: 13px;
-  }
-}
-
-/* ============================================================
    LANDING PAGE
    ============================================================ */
 
@@ -997,6 +854,7 @@ body {
   margin-bottom: 10px;
 }
 
+.landing-feature-card h2,
 .landing-feature-card h3 {
   margin: 0 0 6px;
   font-size: 16px;

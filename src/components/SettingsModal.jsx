@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import AccountSecurity from './AccountSecurity.jsx';
+import AdminReportsModal from './AdminReportsModal.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { THEME_TABS, DARK_THEME, DEFAULT_THEME } from '../theme/fields.js';
@@ -14,6 +16,7 @@ export default function SettingsModal({ onClose }) {
   const fileInputRef = useRef(null);
   const { signOut } = useAuth();
   const [showDelete, setShowDelete] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -136,6 +139,9 @@ export default function SettingsModal({ onClose }) {
         </div>
 
         {error && <p className="error-text">{error}</p>}
+
+        <AccountSecurity onOpenAdmin={() => setShowAdmin(true)} />
+        {showAdmin && <AdminReportsModal onClose={() => setShowAdmin(false)} />}
 
         <div className="danger-zone">
           {!showDelete ? (

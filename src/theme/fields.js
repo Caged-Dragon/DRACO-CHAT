@@ -21,7 +21,7 @@ export const THEME_TABS = [
     icon: '🔤',
     fields: [
       { key: '--text', label: 'Main text', default: '#241a3d' },
-      { key: '--text-dim', label: 'Secondary text', default: '#7c718f' },
+      { key: '--text-dim', label: 'Secondary text', default: '#6b6080' },
     ],
   },
   {
@@ -29,8 +29,8 @@ export const THEME_TABS = [
     label: 'Accent',
     icon: '🎨',
     fields: [
-      { key: '--accent-from', label: 'Gradient start', default: '#ef4444' },
-      { key: '--accent-to', label: 'Gradient end', default: '#8b5cf6' },
+      { key: '--accent-from', label: 'Gradient start', default: '#dc2626' },
+      { key: '--accent-to', label: 'Gradient end', default: '#7c3aed' },
     ],
   },
   {
@@ -44,7 +44,7 @@ export const THEME_TABS = [
     label: 'Bubbles',
     icon: '💭',
     fields: [
-      { key: '--bubble-mine-bg', label: 'Your bubble', default: '#ef4444' },
+      { key: '--bubble-mine-bg', label: 'Your bubble', default: '#dc2626' },
       { key: '--bubble-mine-text', label: 'Your text', default: '#ffffff' },
       { key: '--bubble-theirs-bg', label: "Friend's bubble", default: '#ffffff' },
       { key: '--bubble-theirs-text', label: "Friend's text", default: '#241a3d' },

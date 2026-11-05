@@ -94,7 +94,7 @@ export default function Login({ onBackToLanding }) {
   // --- "Check your email" screen after signup ---
   if (mode === MODES.CHECK_EMAIL) {
     return (
-      <div className="center-screen">
+      <div className="center-screen" role="main">
         <div className="auth-card">
           <img src="/logo.png" alt="Dragon Chat" className="auth-logo" />
           <h1>Check your email</h1>
@@ -119,7 +119,7 @@ export default function Login({ onBackToLanding }) {
   // --- "Reset link sent" screen ---
   if (mode === MODES.FORGOT_SENT) {
     return (
-      <div className="center-screen">
+      <div className="center-screen" role="main">
         <div className="auth-card">
           <img src="/logo.png" alt="Dragon Chat" className="auth-logo" />
           <h1>Check your email</h1>
@@ -140,7 +140,7 @@ export default function Login({ onBackToLanding }) {
   const isSignup = mode === MODES.SIGNUP;
 
   return (
-    <div className="center-screen">
+    <div className="center-screen" role="main">
       {onBackToLanding && (
         <span className="back-to-landing" onClick={onBackToLanding}>
           ← Home

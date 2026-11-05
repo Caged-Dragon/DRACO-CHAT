@@ -3,11 +3,14 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useGroupCall } from '../contexts/GroupCallContext.jsx';
 import { useUnread } from '../contexts/UnreadContext.jsx';
+import PendingBubble from './PendingBubble.jsx';
+import { sendViaOutbox } from '../utils/outbox.js';
+import { useOutbox } from '../hooks/useOutbox.js';
+import { compressImage } from '../utils/image.js';
 import Avatar from './Avatar.jsx';
 import GifPicker, { gifsEnabled } from './GifPicker.jsx';
 import ForwardModal from './ForwardModal.jsx';
 import { linkifyParts, formatMessageTime, QUICK_EMOJIS, REACTION_EMOJIS } from '../utils/format.js';
-import { useViewportWidth } from '../hooks/useViewportWidth.js';
 
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const TYPING_STOP_DELAY = 3000;
@@ -54,6 +57,11 @@ export default function GroupChatWindow({ group, onBack }) {
   const [fetchedPinned, setFetchedPinned] = useState(null);
   const [addCandidates, setAddCandidates] = useState(null);
   const [panelError, setPanelError] = useState('');
+  const outbox = useOutbox(user.id);
+  const pendingHere = outbox.filter((i) => i.table === 'group_messages' && i.row.group_id === group.id);
+  const [menuMsgId, setMenuMsgId] = useState(null);
+  const canHover =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
 
   const bottomRef = useRef(null);
   const listRef = useRef(null);
@@ -83,7 +91,7 @@ export default function GroupChatWindow({ group, onBack }) {
               ? { id: senderProfile.id, username: senderProfile.username, avatar_url: senderProfile.avatar_url }
               : undefined,
           };
-          setMessages((prev) => [...prev, withSender]);
+          setMessages((prev) => (prev.some((x) => x.id === withSender.id) ? prev : [...prev, withSender]));
           if (payload.new.sender_id !== user.id) markRead();
         }
       )
@@ -137,6 +145,16 @@ export default function GroupChatWindow({ group, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id]);
 
+  // On touch screens the message toolbar opens on tap; close it on any tap elsewhere
+  useEffect(() => {
+    if (menuMsgId === null || canHover) return undefined;
+    const close = (e) => {
+      if (!e.target.closest?.('.bubble-stack.menu-open')) setMenuMsgId(null);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [menuMsgId, canHover]);
+
   // Tell the unread tracker which group is open so its badge stays at zero
   useEffect(() => {
     setActiveGroup(group.id);
@@ -153,7 +171,7 @@ export default function GroupChatWindow({ group, onBack }) {
       return;
     }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, pendingHere.length]);
 
   async function loadMessages() {
     const nowIso = new Date().toISOString();
@@ -386,41 +404,55 @@ export default function GroupChatWindow({ group, onBack }) {
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
 
-    await supabase.from('group_messages').insert({
-      group_id: group.id,
-      sender_id: user.id,
-      content,
-      reply_to_id: replyingTo?.id ?? null,
-      mentions: mentionedIds,
-      expires_at: expiresAt,
-    });
-
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'group_messages',
+      {
+        group_id: group.id,
+        sender_id: user.id,
+        content,
+        reply_to_id: replyingTo?.id ?? null,
+        mentions: mentionedIds,
+        expires_at: expiresAt,
+      },
+      content
+    );
   }
 
   async function sendAttachmentMessage({ attachment_url, attachment_type, attachment_name }) {
     const expiresAt = disappearingSeconds
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
-    await supabase.from('group_messages').insert({
-      group_id: group.id,
-      sender_id: user.id,
-      attachment_url,
-      attachment_type,
-      attachment_name,
-      expires_at: expiresAt,
-    });
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'group_messages',
+      {
+        group_id: group.id,
+        sender_id: user.id,
+        attachment_url,
+        attachment_type,
+        attachment_name,
+        expires_at: expiresAt,
+      },
+      attachment_type === 'image' ? '📷 Photo' : attachment_type === 'gif' ? 'GIF' : `📎 ${attachment_name || 'Attachment'}`
+    );
   }
 
   async function handleAttachmentPick(e) {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setAttachError('File is too large (max 15MB).');
-      return;
-    }
+    if (!picked) return;
     setAttachError('');
     setUploading(true);
+    // Photos are shrunk before upload (faster, less data); other files go as-is
+    const file = await compressImage(picked, { maxDim: 1600, quality: 0.82 });
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachError('File is too large (max 15MB).');
+      setUploading(false);
+      return;
+    }
 
     const path = `${user.id}/${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage.from('chat-attachments').upload(path, file);
@@ -495,39 +527,14 @@ export default function GroupChatWindow({ group, onBack }) {
       ? members.filter((m) => m.id !== user.id && m.last_read_at >= lastMessage.created_at).length
       : null;
 
-  const viewportWidth = useViewportWidth();
-  const isSmall = viewportWidth <= 400;
-  const isMobile = viewportWidth <= 640;
-
-  const headerStyle = isMobile
-    ? { padding: isSmall ? '8px 10px' : '10px 14px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-  const iconBtnStyle = isMobile
-    ? { fontSize: isSmall ? 13 : 15, padding: '4px 2px', flexShrink: 0 }
-    : undefined;
-  const nameWrapStyle = isMobile
-    ? { minWidth: 0, flex: '1 1 auto', overflow: 'hidden', cursor: 'pointer' }
-    : { cursor: 'pointer' };
-  const nameTextStyle = isMobile
-    ? { fontSize: isSmall ? 13 : 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-    : undefined;
-  const inputRowStyle = isMobile
-    ? { padding: isSmall ? '8px' : '10px 12px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-  const textInputStyle = { flex: '1 1 auto', minWidth: 0 };
-  const sendBtnStyle = isMobile
-    ? { padding: isSmall ? '8px 12px' : '9px 16px', fontSize: isSmall ? 13 : 14, flexShrink: 0, whiteSpace: 'nowrap' }
-    : { flexShrink: 0 };
-  const attachIconStyle = isMobile ? { fontSize: isSmall ? 16 : 18, flexShrink: 0 } : { flexShrink: 0 };
-
   return (
     <div className="chat-window">
-      <div className="chat-header" style={headerStyle}>
-        <button className="back-btn" onClick={onBack} aria-label="Back" style={iconBtnStyle}>
+      <div className="chat-header">
+        <button className="back-btn" onClick={onBack} aria-label="Back">
           ←
         </button>
-        <div className="chat-header-name" onClick={() => setShowMembers((s) => !s)} style={nameWrapStyle}>
-          <div style={nameTextStyle}>👥 {group.name}</div>
+        <div className="chat-header-name" onClick={() => setShowMembers((s) => !s)}>
+          <div>👥 {group.name}</div>
           <div className="chat-header-sub">
             {typingNames.length > 0 ? `${typingNames.join(', ')} typing...` : `${members.length} members`}
           </div>
@@ -537,7 +544,7 @@ export default function GroupChatWindow({ group, onBack }) {
           onClick={() => joinCall(group, 'audio')}
           disabled={!!activeCall}
           aria-label="Group voice call"
-          style={iconBtnStyle}
+         
         >
           📞
         </button>
@@ -546,7 +553,7 @@ export default function GroupChatWindow({ group, onBack }) {
           onClick={() => joinCall(group, 'video')}
           disabled={!!activeCall}
           aria-label="Group video call"
-          style={iconBtnStyle}
+         
         >
           🎥
         </button>
@@ -623,6 +630,7 @@ export default function GroupChatWindow({ group, onBack }) {
           <div className="disappearing-row">
             <span>⏱ Disappearing messages</span>
             <select
+              aria-label="Disappearing messages timer"
               value={disappearingSeconds}
               disabled={!isAdmin}
               onChange={(e) => updateDisappearing(Number(e.target.value))}
@@ -639,7 +647,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
       {pinnedMessage && (
         <div className="pinned-banner">
-          📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}
+          <span className="pinned-text">📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}</span>
           <button onClick={() => handleTogglePin(pinnedMessage)}>Unpin</button>
         </div>
       )}
@@ -656,6 +664,53 @@ export default function GroupChatWindow({ group, onBack }) {
           const isLastOfMine = isMine && idx === messages.length - 1;
           return (
             <div key={m.id} className={`bubble-row ${isMine ? 'mine' : 'theirs'}`}>
+              <div
+                className={`bubble-stack${menuMsgId === m.id ? ' menu-open' : ''}`}
+                onMouseEnter={canHover ? () => setMenuMsgId(m.id) : undefined}
+                onMouseLeave={canHover ? () => setMenuMsgId((id) => (id === m.id ? null : id)) : undefined}
+                onClick={
+                  canHover
+                    ? undefined
+                    : (e) => {
+                        if (e.target.closest('a, button, input, audio')) return;
+                        setMenuMsgId((id) => (id === m.id ? null : m.id));
+                      }
+                }
+              >
+                {menuMsgId === m.id && !m.deleted_at && (
+                  <div className="bubble-hover-actions">
+                    {REACTION_EMOJIS.slice(0, 3).map((e) => (
+                      <button key={e} onClick={() => handleReact(m.id, e)} title="React">
+                        {e}
+                      </button>
+                    ))}
+                    <button onClick={() => setReplyingTo(m)} title="Reply">
+                      ↩
+                    </button>
+                    <button onClick={() => setForwardingMessage(m)} title="Forward">
+                      ➡️
+                    </button>
+                    <button onClick={() => handleTogglePin(m)} title={m.pinned_at ? 'Unpin' : 'Pin'}>
+                      📌
+                    </button>
+                    {isMine && m.content && (
+                      <button
+                        onClick={() => {
+                          const next = prompt('Edit message', m.content);
+                          if (next && next.trim()) handleEdit(m.id, next.trim());
+                        }}
+                        title="Edit"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                    {isMine && (
+                      <button onClick={() => handleDelete(m.id)} title="Delete">
+                        🗑
+                      </button>
+                    )}
+                  </div>
+                )}
               <div className={`bubble ${isMine ? 'mine' : 'theirs'}`}>
                 {!isMine && <div className="group-sender-name">{m.sender?.username}</div>}
                 {quoted && (
@@ -739,44 +794,12 @@ export default function GroupChatWindow({ group, onBack }) {
                   <div className="seen-by-text">{seenByCount > 0 ? `Seen by ${seenByCount}` : 'Sent'}</div>
                 )}
 
-                {!m.deleted_at && (
-                  <div className="bubble-hover-actions">
-                    {REACTION_EMOJIS.slice(0, 3).map((e) => (
-                      <button key={e} onClick={() => handleReact(m.id, e)} title="React">
-                        {e}
-                      </button>
-                    ))}
-                    <button onClick={() => setReplyingTo(m)} title="Reply">
-                      ↩
-                    </button>
-                    <button onClick={() => setForwardingMessage(m)} title="Forward">
-                      ➡️
-                    </button>
-                    <button onClick={() => handleTogglePin(m)} title={m.pinned_at ? 'Unpin' : 'Pin'}>
-                      📌
-                    </button>
-                    {isMine && m.content && (
-                      <button
-                        onClick={() => {
-                          const next = prompt('Edit message', m.content);
-                          if (next && next.trim()) handleEdit(m.id, next.trim());
-                        }}
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
-                    )}
-                    {isMine && (
-                      <button onClick={() => handleDelete(m.id)} title="Delete">
-                        🗑
-                      </button>
-                    )}
-                  </div>
-                )}
+              </div>
               </div>
             </div>
           );
         })}
+        {pendingHere.map((p) => <PendingBubble key={p.id} item={p} userId={user.id} />)}
         <div ref={bottomRef} />
       </div>
 
@@ -805,21 +828,21 @@ export default function GroupChatWindow({ group, onBack }) {
         </div>
       )}
 
-      <form className="chat-input" onSubmit={sendMessage} style={inputRowStyle}>
+      <form className="chat-input" onSubmit={sendMessage}>
         <button
           type="button"
           className="attach-btn"
           onClick={() => setShowEmojiPicker((s) => !s)}
-          style={attachIconStyle}
+         
         >
           😊
         </button>
         {gifsEnabled && (
         <button
           type="button"
-          className="attach-btn"
+          className="attach-btn gif-btn"
           onClick={() => setShowGifPicker((s) => !s)}
-          style={attachIconStyle}
+          aria-label="Send GIF"
         >
           GIF
         </button>
@@ -829,7 +852,7 @@ export default function GroupChatWindow({ group, onBack }) {
           className="attach-btn"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          style={attachIconStyle}
+         
         >
           {uploading ? '…' : '📎'}
         </button>
@@ -845,9 +868,9 @@ export default function GroupChatWindow({ group, onBack }) {
           placeholder="Message the group... (@ to mention)"
           value={text}
           onChange={handleTextChange}
-          style={textInputStyle}
+         
         />
-        <button type="submit" style={sendBtnStyle}>
+        <button type="submit">
           Send
         </button>
       </form>

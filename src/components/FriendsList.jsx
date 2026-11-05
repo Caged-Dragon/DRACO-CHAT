@@ -17,6 +17,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
   const [friends, setFriends] = useState([]);
   const [blockedIds, setBlockedIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuUp, setMenuUp] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
 
   useEffect(() => {
@@ -147,6 +148,9 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
           className="friend-menu-btn"
           onClick={(e) => {
             e.stopPropagation();
+            // open upwards when there isn't room below the button
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuUp(window.innerHeight - rect.bottom < 260);
             setOpenMenuId(openMenuId === f.id ? null : f.id);
           }}
           aria-label="Friend options"
@@ -154,7 +158,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
           ⋮
         </button>
         {openMenuId === f.id && (
-          <div className="friend-menu" onClick={(e) => e.stopPropagation()}>
+          <div className={`friend-menu${menuUp ? ' up' : ''}`} onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => {
                 setPref('f', f.id, { muted: !pref.muted });
@@ -191,7 +195,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
 
   return (
     <div className="friends-list">
-      <h3>Friends</h3>
+      <h2>Friends</h2>
       {visibleFriends.length === 0 && <p className="dim small">No friends yet. Search above.</p>}
       <ul>{activeFriends.map(renderRow)}</ul>
 
@@ -207,7 +211,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
 
       {blockedIds.size > 0 && (
         <div className="blocked-section">
-          <h3>Blocked</h3>
+          <h2>Blocked</h2>
           <ul>
             {friends
               .filter((f) => blockedIds.has(f.id))

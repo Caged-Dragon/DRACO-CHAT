@@ -1,3 +1,9 @@
+// !!! SHARED PROJECT WARNING !!!
+// This project (CAGED_DRAGON) is shared with other Caged Dragon apps. This function
+// calls auth.admin.deleteUser(), which removes the person's login for EVERY app on the
+// project, not just Dragon Chat. Do not deploy it until it is changed to delete only
+// Dragon Chat data (files + public.profiles row) and keep the auth user.
+//
 // delete-account — lets a signed-in user permanently delete their own account.
 // Removes every file they uploaded, then deletes the auth user; database rows
 // (profile, messages, friendships, ...) are removed by ON DELETE CASCADE.

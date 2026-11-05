@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from './AuthContext.jsx';
 
 const StatusContext = createContext(null);
@@ -76,7 +77,8 @@ export function StatusProvider({ children }) {
     return { error };
   }
 
-  async function postImageStatus(file, caption) {
+  async function postImageStatus(rawFile, caption) {
+    const file = await compressImage(rawFile, { maxDim: 1280, quality: 0.82 });
     const path = `${user.id}/${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage.from('status-media').upload(path, file);
     if (uploadError) return { error: uploadError };

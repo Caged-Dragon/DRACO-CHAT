@@ -1,8 +1,15 @@
 -- ============================================================
--- DRAGON CHAT — SUPABASE SCHEMA (v5.8, mirrors the live database)
--- Fresh install: run this whole file once in
---   Supabase Dashboard > SQL Editor.
--- It is idempotent, so re-running it on an existing project is safe.
+-- DRAGON CHAT - SUPABASE SCHEMA (v5.11) - SHARED-PROJECT EDITION
+-- Applied to the Supabase project CAGED_DRAGON (gbeurqibcfvquacasofq).
+--
+-- CAGED_DRAGON also hosts other Caged Dragon products (webhub, store,
+-- mail, gamehub, ...), so this file only ever touches DracoChat's OWN
+-- tables. The three statements that used to cover every table in
+-- `public` (revoke from anon, revoke truncate/references/trigger, and the
+-- "Require MFA when enrolled" policy loop) are scoped to the 20 DracoChat
+-- tables listed inside them. Never re-add `all tables in schema public`.
+--
+-- It is idempotent: re-running it on an existing project is safe.
 -- ============================================================
 
 create schema if not exists private;
@@ -37,10 +44,16 @@ create policy "Users can update own profile" on public.profiles
 
 -- Email addresses are private: other users can never read the email column.
 -- (The app reads its own email from the auth session: user.email.)
-revoke select on public.profiles from anon, authenticated;
+-- Remove ALL default table-level rights first (a new Supabase project grants them),
+-- then give back only the specific columns users may read / edit.
+revoke all on public.profiles from anon, authenticated;
 grant select (id, username, created_at, avatar_url, status_message, presence_status, last_seen_at, user_number)
   on public.profiles to authenticated;
-revoke all on all tables in schema public from anon;
+do $$ declare t text; begin
+  foreach t in array array['profiles','friendships','blocks','messages','message_reactions','user_settings','chat_settings','reports','calls','push_subscriptions','groups','group_members','group_messages','group_message_reactions','chat_preferences','statuses','status_views','storage_cleanup_queue','client_errors','report_reviews'] loop
+    if to_regclass('public.'||t) is not null then execute format('revoke all on public.%I from anon', t); end if;
+  end loop;
+end $$;
 -- Users may edit only these columns of their own profile row
 grant update (username, avatar_url, status_message, presence_status, last_seen_at)
   on public.profiles to authenticated;
@@ -705,7 +718,11 @@ create trigger rate_limit_reports before insert on public.reports
   for each row execute function private.enforce_rate_limit();
 
 -- Trim client privileges that are never needed
-revoke truncate, references, trigger on all tables in schema public from authenticated;
+do $$ declare t text; begin
+  foreach t in array array['profiles','friendships','blocks','messages','message_reactions','user_settings','chat_settings','reports','calls','push_subscriptions','groups','group_members','group_messages','group_message_reactions','chat_preferences','statuses','status_views','storage_cleanup_queue','client_errors','report_reviews'] loop
+    if to_regclass('public.'||t) is not null then execute format('revoke truncate, references, trigger on public.%I from authenticated', t); end if;
+  end loop;
+end $$;
 
 -- ============================================================
 -- v5.8 ADDITIONS (idempotent) — roles, search, server push,
@@ -833,7 +850,7 @@ alter table public.group_messages add column if not exists push_sent_at timestam
 create table if not exists private.app_config (key text primary key, value text not null);
 -- !! Replace YOUR-PROJECT-REF with your Supabase project reference, e.g. abcdefghijklmnop
 insert into private.app_config (key, value)
-  values ('functions_url', 'https://YOUR-PROJECT-REF.supabase.co/functions/v1')
+  values ('functions_url', 'https://gbeurqibcfvquacasofq.supabase.co/functions/v1')
   on conflict (key) do nothing;
 
 create or replace function private.call_function(fn text, payload jsonb)
@@ -1016,3 +1033,251 @@ end; $$;
 drop policy if exists "No client access to the clean-up queue" on public.storage_cleanup_queue;
 create policy "No client access to the clean-up queue" on public.storage_cleanup_queue
   for all to authenticated using (false) with check (false);
+
+-- ============================================================
+-- v5.11 ADDITIONS (idempotent) — admin report review, suspension,
+-- "download my data", two-step-verification enforcement
+-- ============================================================
+
+-- ---- Admin + suspension flags (no column grants: users can never read or set them) ----
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+alter table public.profiles add column if not exists suspended_at timestamptz;
+-- To make someone an admin, run in the SQL Editor:
+--   update public.profiles set is_admin = true where username = 'YOUR-USERNAME';
+
+create or replace function private.is_admin(p_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce((select p.is_admin from public.profiles p where p.id = p_user), false);
+$$;
+
+create or replace function private.not_suspended(p_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select not exists (select 1 from public.profiles p where p.id = p_user and p.suspended_at is not null);
+$$;
+revoke execute on function private.is_admin(uuid), private.not_suspended(uuid) from public, anon;
+grant execute on function private.is_admin(uuid), private.not_suspended(uuid) to authenticated;
+
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select private.is_admin((select auth.uid()));
+$$;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
+-- Suspended accounts can still read, but cannot send anything new
+drop policy if exists "Users can send messages" on public.messages;
+create policy "Users can send messages" on public.messages for insert to authenticated
+  with check (
+    (select auth.uid()) = sender_id
+    and private.not_suspended((select auth.uid()))
+    and private.are_friends(sender_id, receiver_id)
+    and not exists (
+      select 1 from public.blocks b
+      where (b.blocker_id = messages.receiver_id and b.blocked_id = (select auth.uid()))
+         or (b.blocker_id = (select auth.uid()) and b.blocked_id = messages.receiver_id)
+    )
+  );
+
+drop policy if exists "Members can send group messages" on public.group_messages;
+create policy "Members can send group messages" on public.group_messages for insert to authenticated
+  with check (
+    (select auth.uid()) = sender_id
+    and private.not_suspended((select auth.uid()))
+    and private.is_group_member(group_id, (select auth.uid()))
+  );
+
+drop policy if exists "Users can send friend requests" on public.friendships;
+create policy "Users can send friend requests" on public.friendships for insert to authenticated
+  with check (
+    (select auth.uid()) = requester_id
+    and status = 'pending'
+    and private.not_suspended((select auth.uid()))
+    and not exists (
+      select 1 from public.blocks b
+      where (b.blocker_id = addressee_id and b.blocked_id = requester_id)
+         or (b.blocker_id = requester_id and b.blocked_id = addressee_id)
+    )
+  );
+
+drop policy if exists "Users can post their own status" on public.statuses;
+create policy "Users can post their own status" on public.statuses for insert to authenticated
+  with check ((select auth.uid()) = user_id and private.not_suspended((select auth.uid())));
+
+-- ---- Report review (admins only, through functions) ----
+create table if not exists public.report_reviews (
+  report_id uuid primary key references public.reports(id) on delete cascade,
+  status text not null check (status in ('resolved', 'dismissed')),
+  note text check (note is null or char_length(note) <= 1000),
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamptz not null default now()
+);
+alter table public.report_reviews enable row level security;
+revoke all on public.report_reviews from anon, authenticated;
+drop policy if exists "No client access to report reviews" on public.report_reviews;
+create policy "No client access to report reviews" on public.report_reviews
+  for all to authenticated using (false) with check (false);
+
+create or replace function public.admin_list_reports(p_status text default 'open', p_limit integer default 100)
+returns table (
+  id uuid, created_at timestamptz, reason text, status text, admin_note text, reviewed_at timestamptz,
+  reporter_id uuid, reporter_username text,
+  reported_id uuid, reported_username text, reported_suspended boolean, reports_against_total bigint,
+  message_content text, message_attachment text, message_created_at timestamptz
+)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not private.is_admin((select auth.uid())) then
+    raise exception 'Not authorized' using errcode = '42501';
+  end if;
+  return query
+  select r.id, r.created_at, r.reason,
+         coalesce(rv.status, 'open'), rv.note, rv.reviewed_at,
+         r.reporter_id, rp.username,
+         r.reported_id, rd.username, rd.suspended_at is not null,
+         (select count(*) from public.reports x where x.reported_id = r.reported_id),
+         m.content, coalesce(m.attachment_name, m.attachment_type), m.created_at
+  from public.reports r
+  join public.profiles rp on rp.id = r.reporter_id
+  join public.profiles rd on rd.id = r.reported_id
+  left join public.report_reviews rv on rv.report_id = r.id
+  left join public.messages m on m.id = r.message_id
+  where p_status = 'all' or coalesce(rv.status, 'open') = p_status
+  order by r.created_at desc
+  limit least(greatest(p_limit, 1), 200);
+end; $$;
+revoke execute on function public.admin_list_reports(text, integer) from public, anon;
+grant execute on function public.admin_list_reports(text, integer) to authenticated;
+
+create or replace function public.admin_review_report(
+  p_report_id uuid, p_status text, p_note text default null, p_suspend boolean default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare target uuid;
+begin
+  if not private.is_admin((select auth.uid())) then
+    raise exception 'Not authorized' using errcode = '42501';
+  end if;
+  if p_status not in ('resolved', 'dismissed') then
+    raise exception 'Status must be resolved or dismissed';
+  end if;
+  select r.reported_id into target from public.reports r where r.id = p_report_id;
+  if target is null then raise exception 'Report not found'; end if;
+
+  insert into public.report_reviews (report_id, status, note, reviewed_by, reviewed_at)
+  values (p_report_id, p_status, nullif(btrim(p_note), ''), (select auth.uid()), now())
+  on conflict (report_id) do update
+    set status = excluded.status, note = excluded.note,
+        reviewed_by = excluded.reviewed_by, reviewed_at = excluded.reviewed_at;
+
+  if p_suspend is not null then
+    if private.is_admin(target) then raise exception 'Admins cannot be suspended here'; end if;
+    update public.profiles set suspended_at = case when p_suspend then now() else null end where id = target;
+  end if;
+end; $$;
+revoke execute on function public.admin_review_report(uuid, text, text, boolean) from public, anon;
+grant execute on function public.admin_review_report(uuid, text, text, boolean) to authenticated;
+
+-- ---- "Download my data" ----
+create or replace function public.export_my_data()
+returns jsonb language plpgsql stable security invoker set search_path = '' as $$
+declare uid uuid := (select auth.uid());
+begin
+  if uid is null then raise exception 'Not signed in' using errcode = '42501'; end if;
+  return jsonb_build_object(
+    'exported_at', now(),
+    'note', 'Everything Dragon Chat holds about your account, as you can see it. Direct messages include both sides of your conversations.',
+    'account', jsonb_build_object('id', uid, 'email', (select auth.jwt() ->> 'email')),
+    'profile', (select jsonb_build_object('username', p.username, 'status_message', p.status_message,
+                  'avatar_url', p.avatar_url, 'presence_status', p.presence_status,
+                  'last_seen_at', p.last_seen_at, 'user_number', p.user_number, 'created_at', p.created_at)
+                from public.profiles p where p.id = uid),
+    'friends', coalesce((select jsonb_agg(jsonb_build_object('username', fp.username, 'status', f.status,
+                  'requested_by_me', f.requester_id = uid, 'since', f.created_at) order by f.created_at)
+                from public.friendships f
+                join public.profiles fp on fp.id = case when f.requester_id = uid then f.addressee_id else f.requester_id end
+                where uid in (f.requester_id, f.addressee_id)), '[]'::jsonb),
+    'direct_messages', coalesce((select jsonb_agg(jsonb_build_object('with', op.username,
+                  'direction', case when m.sender_id = uid then 'sent' else 'received' end,
+                  'content', m.content, 'attachment', coalesce(m.attachment_name, m.attachment_type),
+                  'attachment_url', m.attachment_url, 'sent_at', m.created_at, 'edited_at', m.edited_at,
+                  'deleted_at', m.deleted_at, 'pinned', m.pinned_at is not null) order by m.created_at)
+                from public.messages m
+                join public.profiles op on op.id = case when m.sender_id = uid then m.receiver_id else m.sender_id end
+                where uid in (m.sender_id, m.receiver_id)), '[]'::jsonb),
+    'groups', coalesce((select jsonb_agg(jsonb_build_object('name', g.name, 'role', gm.role,
+                  'joined_at', gm.joined_at, 'created_by_me', g.created_by = uid) order by gm.joined_at)
+                from public.group_members gm join public.groups g on g.id = gm.group_id
+                where gm.user_id = uid), '[]'::jsonb),
+    'group_messages_sent', coalesce((select jsonb_agg(jsonb_build_object('group', g.name, 'content', m.content,
+                  'attachment', coalesce(m.attachment_name, m.attachment_type), 'attachment_url', m.attachment_url,
+                  'sent_at', m.created_at, 'deleted_at', m.deleted_at) order by m.created_at)
+                from public.group_messages m join public.groups g on g.id = m.group_id
+                where m.sender_id = uid), '[]'::jsonb),
+    'statuses', coalesce((select jsonb_agg(jsonb_build_object('type', s.content_type, 'text', s.text_content,
+                  'media_url', s.media_url, 'posted_at', s.created_at, 'expires_at', s.expires_at) order by s.created_at)
+                from public.statuses s where s.user_id = uid), '[]'::jsonb),
+    'calls', coalesce((select jsonb_agg(jsonb_build_object('type', c.call_type, 'status', c.status,
+                  'duration_seconds', c.duration_seconds, 'i_called', c.caller_id = uid, 'at', c.created_at) order by c.created_at)
+                from public.calls c where uid in (c.caller_id, c.callee_id)), '[]'::jsonb),
+    'blocked_users', coalesce((select jsonb_agg(jsonb_build_object('username', bp.username, 'since', b.created_at))
+                from public.blocks b join public.profiles bp on bp.id = b.blocked_id
+                where b.blocker_id = uid), '[]'::jsonb),
+    'reports_filed', coalesce((select jsonb_agg(jsonb_build_object('about', rp.username, 'reason', r.reason, 'at', r.created_at))
+                from public.reports r join public.profiles rp on rp.id = r.reported_id
+                where r.reporter_id = uid), '[]'::jsonb),
+    'settings', jsonb_build_object(
+      'global', (select jsonb_build_object('theme', us.theme, 'wallpaper_url', us.wallpaper_url)
+                 from public.user_settings us where us.user_id = uid),
+      'chat_preferences', coalesce((select jsonb_agg(jsonb_build_object('chat', coalesce(fp.username, g.name),
+                  'muted', cp.muted, 'archived', cp.archived))
+                from public.chat_preferences cp
+                left join public.profiles fp on fp.id = cp.friend_id
+                left join public.groups g on g.id = cp.group_id
+                where cp.owner_id = uid), '[]'::jsonb)),
+    'push_devices_registered', (select count(*) from public.push_subscriptions ps where ps.user_id = uid)
+  );
+end; $$;
+revoke execute on function public.export_my_data() from public, anon;
+grant execute on function public.export_my_data() to authenticated;
+
+create index if not exists report_reviews_reviewed_by_idx on public.report_reviews (reviewed_by) where reviewed_by is not null;
+
+-- One UPDATE policy on group_members (own read marker / admins changing roles; a trigger limits what each may change)
+drop policy if exists "Members can update own membership" on public.group_members;
+drop policy if exists "Admins can change member roles" on public.group_members;
+drop policy if exists "Members and admins can update membership" on public.group_members;
+create policy "Members and admins can update membership" on public.group_members for update to authenticated
+  using ((select auth.uid()) = user_id or private.is_group_admin(group_id, (select auth.uid())))
+  with check ((select auth.uid()) = user_id or private.is_group_admin(group_id, (select auth.uid())));
+
+-- ---- Two-step verification enforcement (MUST stay at the very end of this file) ----
+-- If a user has a verified authenticator, the database itself refuses their data
+-- unless the session passed the second step (aal2). Users without one are unaffected.
+create or replace function private.has_mfa(p_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from auth.mfa_factors f
+    where f.user_id = p_user and f.status = 'verified'
+  );
+$$;
+revoke execute on function private.has_mfa(uuid) from public, anon;
+grant execute on function private.has_mfa(uuid) to authenticated;
+
+do $$
+declare t text;
+begin
+  for t in select unnest(array['profiles','friendships','blocks','messages','message_reactions','user_settings','chat_settings','reports','calls','push_subscriptions','groups','group_members','group_messages','group_message_reactions','chat_preferences','statuses','status_views','storage_cleanup_queue','client_errors','report_reviews']) loop
+    execute format('drop policy if exists "Require MFA when enrolled" on public.%I', t);
+    execute format(
+      'create policy "Require MFA when enrolled" on public.%I as restrictive for all to authenticated
+         using ((((select auth.jwt()) ->> ''aal'') = ''aal2'') or not private.has_mfa((select auth.uid())))
+         with check ((((select auth.jwt()) ->> ''aal'') = ''aal2'') or not private.has_mfa((select auth.uid())))',
+      t);
+  end loop;
+end $$;
+
+-- anon never needs direct table access in DracoChat (scoped to DracoChat tables only)
+do $$ declare t text; begin
+  foreach t in array array['profiles','friendships','blocks','messages','message_reactions','user_settings','chat_settings','reports','calls','push_subscriptions','groups','group_members','group_messages','group_message_reactions','chat_preferences','statuses','status_views','storage_cleanup_queue','client_errors','report_reviews'] loop
+    execute format('revoke all on public.%I from anon', t);
+  end loop;
+end $$;

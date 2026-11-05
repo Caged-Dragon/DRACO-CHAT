@@ -1,5 +1,17 @@
 # 🐉 Dragon Chat (v5.5)
 
+> ### Shared Supabase project: CAGED_DRAGON
+> Dragon Chat runs on the **CAGED_DRAGON** Supabase project (`gbeurqibcfvquacasofq`), which is
+> shared with other Caged Dragon products (webhub, store, mail, gamehub, ...).
+> - `supabase/schema.sql` only touches Dragon Chat's own 20 tables. **Never** add statements that
+>   cover `all tables in schema public` - they would change access for the other apps.
+> - **Do not deploy `delete-account` as-is.** It deletes the auth user, which on a shared project
+>   would delete the person's account in every other Caged Dragon product. It needs a chat-only
+>   variant first (the Delete Account button will show an error until then).
+> - `send-push` is deprecated; push is sent by the `notify-message` function.
+> - Deployed already: `notify-message`, `cleanup-storage` (both `--no-verify-jwt`).
+> - Still to set by hand: VAPID secrets, Auth URL configuration (see below).
+
 *Connect Different. Chat Real.*
 
 A full-featured, installable chat web app: 1:1 and group messaging,
@@ -9,6 +21,81 @@ theming, status/stories, and more. Built by **Caged Dragon Studios**.
 **Stack:** React + Vite (frontend) · Supabase (auth, database, realtime, storage) · GitHub + Vercel (hosting)
 
 ---
+
+## v5.11 — Safety, privacy and reliability
+
+**People & safety**
+- **Admin report review:** admins get *Settings → Account & privacy → Admin: review reports* — see who reported whom, the
+  reason and the reported message, add a private note, **dismiss / resolve / resolve + suspend**, and un-suspend. Suspended
+  accounts can still read but cannot send messages, friend requests or statuses.
+  Make yourself the first admin (Supabase SQL Editor): `update public.profiles set is_admin = true where username = 'YOUR-USERNAME';`
+- **Two-step verification** (authenticator app) in Settings, plus a code screen at sign-in. It is **enforced by the database**:
+  an account with it turned on can't read or write anything with a password-only session. (Check *Authentication → Multi-Factor* is enabled in Supabase.)
+- **Download my data** (JSON) in Settings.
+- **Fix for brand-new projects:** `schema.sql` now strips Supabase's default table-level rights on `profiles` so users can
+  only edit their own username, avatar, status and presence (previously a fresh install would have let a user edit `is_admin`).
+
+**Reliability & speed**
+- **Offline message queue:** messages (text, GIFs, photos, voice) are saved on the device and delivered automatically when the
+  connection returns; failed ones show "Not sent" with Retry / Delete. Group chats no longer silently drop a failed message.
+- **Photos are compressed before upload** (max 1600 px; avatars 512 px), saving data and storage.
+- **"New version available" banner** with a one-tap reload.
+- Group calls: fixed a race that could leave one link stuck "connecting"; stuck links are now rebuilt after 20 s.
+
+**Accessibility:** pop-ups are real dialogs (focus moves in and is trapped, Escape closes, focus returns); labelled controls,
+page landmarks, heading order, visible keyboard focus, and AA text contrast on the default theme (checked with axe-core).
+
+**Automated checks:** `.github/workflows/ci.yml` runs unit, layout, accessibility, feature and real-WebRTC call tests on every
+push (needs GitHub Actions enabled); `.github/dependabot.yml` opens weekly dependency-update PRs.
+Locally: `npm run test:all` (needs `pip install playwright pillow` and `python -m playwright install chromium`).
+
+## v5.10 — Better calling
+
+**Reliability**
+- **Reconnects dropped calls:** if the network blips (wifi↔mobile data), the call shows "Reconnecting…" and
+  automatically restarts the connection (ICE restart) — up to 3 tries, with a manual "Try again" button.
+  If it can't recover, the call ends with a clear message *and the other person is told*.
+- **TURN relay support:** `VITE_TURN_URL` now accepts several comma-separated URLs
+  (`turn:host:3478?transport=udp,turn:host:3478?transport=tcp,turns:host:443?transport=tcp`).
+  A TURN relay is strongly recommended: many mobile/corporate networks can't make direct connections.
+- Faster start (candidate pre-gathering), 25 s connect timeout, offline pre-check, busy-line reply
+  ("X is on another call"), and call errors ("No answer", "declined", permission denied) are now actually shown.
+
+**Quality**
+- Microphone: echo cancellation, noise suppression and auto-gain requested; Opus tuned with
+  in-band FEC + DTX (mono, 32 kbps cap) so voice survives packet loss and uses little data.
+- Video: resolution/frame-rate/bitrate chosen from the network (phone data vs wifi), motion kept smooth;
+  screen share keeps text sharp.
+- **Signal indicator** (green/yellow/red bars) from live stats; on a poor connection video is **paused
+  automatically** to keep the audio clear and resumes when the link recovers.
+
+**Experience**
+- Ringtone, ringback tone, vibration, connect/hang-up cues (generated in code, no audio files);
+  system notification for an incoming call when the tab is in the background.
+- Screen stays awake during calls; live microphone level ring on the mute button.
+- Flip camera, choose microphone / camera / speaker mid-call; see when the other person is muted or
+  has their camera off.
+- **Group calls:** fixed — *voice-only group calls played no sound*; per-person "Reconnecting…", mute icons,
+  video quality drops as the room fills, capped at 6 people (mesh), responsive tile grid.
+
+**Tests:** `npm run test:calls` runs two end-to-end suites in a real browser with real WebRTC and fake
+devices (1:1 calls: 39 checks; group calls: 14 checks). Unit tests: `npm test`.
+
+## v5.9 — Responsive, mobile-first layout
+
+- New `src/layout.css` (loaded after `styles.css`): the **phone layout is the base**; `min-width`
+  queries add the tablet (768px+ — sidebar and chat side by side) and desktop (1100px+/1500px+ —
+  wider sidebar, centred conversation column) layouts. Safe-area insets, `100dvh`, and 16px inputs
+  (no iOS zoom) are handled.
+- Fixed the real causes of overlapping components: flex children squashing into each other
+  (sidebar, modals), message toolbars floating over neighbouring bubbles (they now open on **tap**
+  on touch screens, in flow above the bubble), modals launched from the sidebar hiding behind the
+  chat on tablets/desktops, and ~18 components that had no CSS at all (GIF picker, pinned banner,
+  @mention list, forward list, global search results, ...).
+- Modals are bottom sheets on phones and centred cards from 600px up.
+- Removed the JavaScript-measured inline-style hacks from the dashboard and chat windows.
+- `tests/ui/` renders the app in a headless browser at 14 screen sizes and fails on any overlap
+  or sideways scrolling (see `tests/ui/README.md`).
 
 ## v5.8 — Features, server-side push, clean-up
 
@@ -266,91 +353,115 @@ per-chat wallpaper images.
 
 ---
 
-## 1. Supabase setup
+## Complete setup guide (fresh start)
 
-1. Go to https://supabase.com → create a new project.
-2. Open **SQL Editor** → paste the **entire contents** of
-   `supabase/schema.sql` → click **Run**. It's fully idempotent (safe to
-   re-run any time you update the file) and sets up:
-   - `profiles` (avatar, status message, presence, last seen)
-   - `friendships` (request/accept flow)
-   - `messages` (attachments, reply, edit, delete, read receipts)
-   - `message_reactions`
-   - `blocks`, `reports`
-   - `calls` (call history)
-   - `groups`, `group_members`, `group_messages`
-   - Storage buckets: `chat-attachments`, `chat-wallpapers`, `avatars`
-   - Row Level Security policies on everything
-   - Realtime enabled on the live-updating tables
-3. Go to **Project Settings → API**. Copy the **Project URL** and
-   **anon public** key.
+### 0. What you need
+- Free accounts: **GitHub**, **Supabase**, **Vercel** (check each site's current free-tier limits).
+- **Node.js 20 LTS or newer** (18 is the minimum) and **Git** installed. Check: `node -v`, `git -v`.
 
-## 2. Auth setup
-
-### Email verification
-**Authentication → Providers → Email** → make sure **"Confirm email"** is
-ON.
-
-### Redirect URLs
-**Authentication → URL Configuration**:
-- **Site URL** → your production URL (e.g. `https://your-app.vercel.app`)
-- **Redirect URLs** → add both `http://localhost:5173` and your
-  production URL
-
-### GitHub OAuth
-1. [GitHub Developer Settings](https://github.com/settings/developers) →
-   **New OAuth App**.
-2. **Authorization callback URL**:
-   `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`
-3. Copy the **Client ID** and generate a **Client Secret**.
-4. Supabase → **Authentication → Providers → GitHub** → paste both in.
-
-## 3. Local setup
-
+### 1. Get the code and install
 ```bash
+unzip dragon-chat-v5.10.zip && cd dragon-chat
 npm install
-cp .env.example .env
+cp .env.example .env        # Windows: copy .env.example .env
 ```
 
-Edit `.env`:
+### 2. Create / choose your Supabase project
+**Option A — reuse the existing "DracoChat" project:** the database, storage rules, scheduled jobs and the
+edge functions are already installed. Skip to step 3.
 
+**Option B — brand-new project:**
+1. supabase.com → **New project** (note the **Project ref**, the `abcdefgh…` part of its URL).
+2. **SQL Editor → New query** → paste all of `supabase/schema.sql` → **Run**. (Safe to run again.)
+   If it complains about `pg_cron` or `pg_net`, enable them under **Database → Extensions**, then run again.
+3. Tell the database where your functions live (new query, use YOUR ref):
+   ```sql
+   update private.app_config
+   set value = 'https://gbeurqibcfvquacasofq.supabase.co/functions/v1'
+   where key = 'functions_url';
+   ```
+4. Deploy the edge functions (from the project folder):
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref gbeurqibcfvquacasofq
+   npx supabase functions deploy notify-message --no-verify-jwt
+   npx supabase functions deploy cleanup-storage --no-verify-jwt
+   npx supabase functions deploy delete-account
+   ```
+
+### 3. Fill in `.env`
+Supabase → **Project Settings → API** → copy the **Project URL** and the **anon / public** key:
 ```
-VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+VITE_SUPABASE_URL=https://gbeurqibcfvquacasofq.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR-ANON-PUBLIC-KEY
-
-# Optional — only needed if you want to add a TURN server for calling
-# reliability across strict networks:
-# VITE_TURN_URL=turn:your-turn-server:3478
-# VITE_TURN_USERNAME=your-username
-# VITE_TURN_CREDENTIAL=your-credential
+VITE_VAPID_PUBLIC_KEY=          # from step 4
+VITE_GIPHY_API_KEY=             # optional — free key at developers.giphy.com; without it the GIF button is hidden
 ```
+Never put the `service_role` key in `.env`. `.env` is git-ignored.
 
+### 4. Push-notification keys (optional but recommended)
+```bash
+npx web-push generate-vapid-keys
+npx supabase secrets set VAPID_PUBLIC_KEY=<public> VAPID_PRIVATE_KEY=<private> VAPID_SUBJECT=mailto:you@yourdomain.com
+```
+Put the **public** key in `.env` as `VITE_VAPID_PUBLIC_KEY`. Keep the private key secret.
+
+### 5. Supabase Authentication settings
+**Authentication → URL Configuration**
+- **Site URL:** `http://localhost:5173` for now (change to your live URL after step 8).
+- **Redirect URLs:** add `http://localhost:5173` (add the live URL later too).
+
+**Authentication → Providers → Email:** keep **Confirm email** ON.
+For real users set up your own **SMTP** (Authentication → Emails → SMTP Settings) — the built-in sender is for testing only.
+Optional: **GitHub** provider (callback URL `https://gbeurqibcfvquacasofq.supabase.co/auth/v1/callback`).
+Optional: enable **Leaked password protection** (Authentication → password settings; may need a paid plan).
+
+### 6. Run it on your computer
 ```bash
 npm run dev
 ```
+Open http://localhost:5173. Create two accounts in two different browsers (or one normal + one private window),
+confirm the emails, add each other as friends, then try: messages, a photo, a GIF, a voice call and a video call.
 
-Test with **three separate logged-in sessions** (different browsers or
-one incognito) for friend requests, chat, and calling — two tabs of the
-same normal browser window share one login session.
-
-## 4. Push to GitHub
-
+### 7. Put the code on GitHub
+Create an empty **private** repository on github.com (no README), then:
 ```bash
+git init
 git add .
-git commit -m "Dragon Chat v5"
-git push
+git commit -m "Dragon Chat v5.10"
+git branch -M main
+git remote add origin https://github.com/YOUR-NAME/YOUR-REPO.git
+git push -u origin main
 ```
 
-## 5. Deploy on Vercel
+### 8. Deploy on Vercel
+1. vercel.com → **Add New… → Project** → **Import** your GitHub repo.
+2. Framework preset **Vite** (auto-detected). Build command `npm run build`, output directory `dist`.
+3. **Environment Variables:** add the same variables as your `.env` (names and values).
+4. **Deploy**. When it finishes you get a URL like `https://your-app.vercel.app`.
+5. Back in Supabase **Authentication → URL Configuration**: set **Site URL** to that URL and add it under
+   **Redirect URLs** (also add your custom domain if you connect one). No redeploy needed.
+6. Changing an environment variable later needs a **Redeploy** in Vercel (they are baked in at build time).
 
-Vercel auto-deploys on every push to `main` once connected. If this is a
-fresh project: **Add New → Project** → import the repo → add the same
-env vars from `.env` under **Environment Variables** → **Deploy**.
+### 9. Before sharing it with people
+- Replace the yellow placeholders in `public/privacy.html` and `public/terms.html` (`[CONTACT EMAIL]`, address, city) and get them reviewed.
+- Open the live site on a phone: sign up, chat, make a call (calls need HTTPS, which Vercel provides), toggle notifications, "Add to Home Screen".
+- For reliable calls on mobile data add a TURN relay: set `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL` in Vercel and redeploy.
 
-After deploying, add your live `.vercel.app` URL to Supabase's
-**Redirect URLs** if you haven't already.
+### 10. Updating later
+Edit code → `git add . && git commit -m "..." && git push` → Vercel redeploys automatically.
+Database changes: run the new SQL in the Supabase SQL Editor (and update `supabase/schema.sql`).
 
----
+### Troubleshooting
+| Symptom | Fix |
+|---|---|
+| Blank page / "Invalid API key" | Wrong or missing `VITE_SUPABASE_*` values; on Vercel add them and **Redeploy**. |
+| Confirmation / reset email sends you to `localhost` | Set **Site URL** and **Redirect URLs** in Supabase to the live URL. |
+| No emails arrive | Check spam; for real use configure custom SMTP. |
+| No GIF button | `VITE_GIPHY_API_KEY` missing. |
+| Calls don't connect on mobile data | Add a TURN relay (step 9). |
+| No push notifications | VAPID secrets not set, or notifications not allowed in the browser. |
+| Edge function errors | Supabase → **Edge Functions → Logs**. |
 
 ## How it works (v5 additions)
 

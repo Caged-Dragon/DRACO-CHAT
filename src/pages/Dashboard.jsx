@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useOutboxFlusher } from '../hooks/useOutbox.js';
 import FriendRequests from '../components/FriendRequests.jsx';
 import FriendsList from '../components/FriendsList.jsx';
 import SearchFriends from '../components/SearchFriends.jsx';
@@ -12,10 +13,9 @@ import GroupChatWindow from '../components/GroupChatWindow.jsx';
 import Avatar from '../components/Avatar.jsx';
 import StatusBar from '../components/StatusBar.jsx';
 const GlobalSearchModal = lazy(() => import('../components/GlobalSearchModal.jsx'));
-import { useViewportWidth } from '../hooks/useViewportWidth.js';
 
 export default function Dashboard() {
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const [activeFriend, setActiveFriend] = useState(null);
   const [activeGroup, setActiveGroup] = useState(null);
   // Bump this to force FriendsList / FriendRequests / GroupsList to refetch
@@ -26,22 +26,12 @@ export default function Dashboard() {
   const [showCallHistory, setShowCallHistory] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
 
+  useOutboxFlusher(user?.id);
+
   const activeChat = activeFriend || activeGroup;
   // On mobile, "chat-open" swaps from the friends list to the full-screen
   // chat window. On desktop this class has no visual effect (see CSS).
   const shellClass = `app-shell${activeChat ? ' chat-open' : ''}`;
-
-  // Same guaranteed dynamic sizing approach as the chat windows — see
-  // ChatWindow.jsx for why inline styles are used here instead of
-  // relying purely on the stylesheet.
-  const viewportWidth = useViewportWidth();
-  const isSmall = viewportWidth <= 400;
-  const isNarrowSidebar = viewportWidth <= 640;
-
-  const brandNameStyle = isNarrowSidebar ? { fontSize: isSmall ? 13 : 14 } : undefined;
-  const actionsBtnStyle = isNarrowSidebar
-    ? { padding: isSmall ? '4px 6px' : '5px 7px', fontSize: isSmall ? 11 : 12 }
-    : undefined;
 
   function selectFriend(f) {
     setActiveGroup(null);
@@ -56,22 +46,23 @@ export default function Dashboard() {
   return (
     <div className={shellClass}>
       <aside className="sidebar">
+        <h1 className="sr-only">Dragon Chat</h1>
         <div className="sidebar-header">
           <div className="brand">
             <img src="/logo.png" alt="Dragon Chat" className="brand-logo" />
-            <span className="brand-name" style={brandNameStyle}>Dragon Chat</span>
+            <span className="brand-name">Dragon Chat</span>
           </div>
           <div className="sidebar-header-actions">
-            <button className="settings-btn" onClick={() => setShowGlobalSearch(true)} aria-label="Search everything" style={actionsBtnStyle}>
+            <button className="settings-btn" onClick={() => setShowGlobalSearch(true)} aria-label="Search everything">
               🔍
             </button>
-            <button className="settings-btn" onClick={() => setShowCallHistory(true)} aria-label="Call history" style={actionsBtnStyle}>
+            <button className="settings-btn" onClick={() => setShowCallHistory(true)} aria-label="Call history">
               📞
             </button>
-            <button className="settings-btn" onClick={() => setShowSettings(true)} aria-label="App settings" style={actionsBtnStyle}>
+            <button className="settings-btn" onClick={() => setShowSettings(true)} aria-label="App settings">
               ⚙️
             </button>
-            <button className="logout-btn" onClick={signOut} style={actionsBtnStyle}>
+            <button className="logout-btn" onClick={signOut}>
               Log out
             </button>
           </div>

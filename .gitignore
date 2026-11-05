@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 .env.local
+
+tests/call/dist/
+tests/call/visual.html

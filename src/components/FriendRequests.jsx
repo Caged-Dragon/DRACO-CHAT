@@ -78,7 +78,7 @@ export default function FriendRequests({ refreshKey, onChange }) {
 
   return (
     <div className="friend-requests">
-      <h3>Friend requests</h3>
+      <h2>Friend requests</h2>
       <ul>
         {requests.map((r) => (
           <li key={r.id}>

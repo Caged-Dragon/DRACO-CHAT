@@ -32,6 +32,7 @@ export default function Landing({ onGetStarted, onLogin }) {
         </button>
       </nav>
 
+      <main>
       <section className="landing-hero">
         <img src="/logo.png" alt="Dragon Chat" className="landing-logo" />
         <h1 className="landing-title">Dragon Chat</h1>
@@ -58,12 +59,13 @@ export default function Landing({ onGetStarted, onLogin }) {
             style={{ animationDelay: `${0.15 * i}s` }}
           >
             <div className="landing-feature-icon">{f.icon}</div>
-            <h3>{f.title}</h3>
+            <h2>{f.title}</h2>
             <p>{f.text}</p>
           </div>
         ))}
       </section>
 
+      </main>
       <footer className="landing-footer">
         <p className="studio-credit">Built by Caged Dragon Studios</p>
         <p className="legal-links">

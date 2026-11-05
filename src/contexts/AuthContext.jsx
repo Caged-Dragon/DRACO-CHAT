@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { setErrorReporterUser } from '../utils/errorReporter.js';
+import { clearOutbox } from '../utils/outbox.js';
 
 const AuthContext = createContext(null);
 
@@ -10,6 +11,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   // True while the user is in the middle of a "reset your password" link flow
   const [recoveryMode, setRecoveryMode] = useState(false);
+  // Two-step verification: which user we last checked, and whether a code is still needed
+  const [mfa, setMfa] = useState({ uid: null, required: false });
 
   useEffect(() => {
     // Load existing session (if the user already logged in before)
@@ -48,7 +51,11 @@ export function AuthProvider({ children }) {
       setProfile(null);
       return;
     }
-    loadProfile(session.user.id);
+    // Defer so we never call auth methods inside the auth-state callback itself
+    const uid = session.user.id;
+    const t = setTimeout(() => checkMfa(uid), 0);
+    loadProfile(uid);
+    return () => clearTimeout(t);
   }, [session]);
 
   // Re-fetch the current user's profile row — used after updating the
@@ -101,7 +108,20 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    // unsent queued messages shouldn't stay on a shared device after logout
+    if (session?.user) clearOutbox(session.user.id);
     await supabase.auth.signOut();
+  }
+
+  // Does this session still need the second step? (only if the account has it turned on)
+  async function checkMfa(uid) {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const required = !error && !!data && data.nextLevel === 'aal2' && data.currentLevel !== 'aal2';
+    setMfa({ uid, required });
+  }
+
+  async function recheckMfa() {
+    if (session?.user) await checkMfa(session.user.id);
   }
 
   const value = {
@@ -118,6 +138,10 @@ export function AuthProvider({ children }) {
     updatePassword,
     signOut,
     refreshProfile,
+    recheckMfa,
+    // true until we know whether this login still needs a two-step code
+    mfaChecking: !!session?.user && mfa.uid !== session.user.id,
+    mfaRequired: !!session?.user && mfa.uid === session.user.id && mfa.required,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import Avatar from './Avatar.jsx';
 import { PRESENCE_LABELS } from '../utils/format.js';
@@ -24,11 +25,12 @@ export default function ProfileModal({ onClose }) {
     : null;
 
   async function handleAvatarPick(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
     setBusy(true);
     setError('');
 
+    const file = await compressImage(picked, { maxDim: 512, quality: 0.85 });
     const path = `${user.id}/${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
       upsert: true,

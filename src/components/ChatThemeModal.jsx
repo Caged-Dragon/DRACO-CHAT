@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { THEME_TABS, DEFAULT_THEME } from '../theme/fields.js';
@@ -64,11 +65,12 @@ export default function ChatThemeModal({
   }
 
   async function handleWallpaperPick(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
     setBusy(true);
     setError('');
 
+    const file = await compressImage(picked, { maxDim: 1920, quality: 0.8 });
     const path = `${user.id}/chat-${friend.id}-${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('chat-wallpapers')

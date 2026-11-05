@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient';
 // users are written to the `client_errors` table (view them in the Supabase
 // dashboard). No third-party service is involved. Rows are auto-deleted
 // after 30 days and rate-limited per user in the database.
-const APP_VERSION = '5.8.0';
+const APP_VERSION = '5.11.0';
 const seen = new Set();
 let currentUserId = null;
 
