@@ -1,3 +1,5 @@
+import ThemeToggle from '../components/ThemeToggle.jsx';
+
 const FEATURES = [
   {
     title: 'Real-time chat',
@@ -7,7 +9,7 @@ const FEATURES = [
   {
     title: 'Friend requests',
     text: 'Search for people, send a request, and chat once they accept.',
-    icon: '🐉',
+    icon: '🤝',
   },
   {
     title: 'Secure by default',
@@ -27,11 +29,15 @@ export default function Landing({ onGetStarted, onLogin }) {
           <img src="/logo.png" alt="Dragon Chat" className="brand-logo" />
           <span className="brand-name">Dragon Chat</span>
         </div>
-        <button className="landing-nav-login" onClick={onLogin}>
-          Log in
-        </button>
+        <div className="landing-nav-actions">
+          <ThemeToggle />
+          <button className="landing-nav-login" onClick={onLogin}>
+            Log in
+          </button>
+        </div>
       </nav>
 
+      <main>
       <section className="landing-hero">
         <img src="/logo.png" alt="Dragon Chat" className="landing-logo" />
         <h1 className="landing-title">Dragon Chat</h1>
@@ -58,13 +64,15 @@ export default function Landing({ onGetStarted, onLogin }) {
             style={{ animationDelay: `${0.15 * i}s` }}
           >
             <div className="landing-feature-icon">{f.icon}</div>
-            <h3>{f.title}</h3>
+            <h2>{f.title}</h2>
             <p>{f.text}</p>
           </div>
         ))}
       </section>
 
+      </main>
       <footer className="landing-footer">
+        <img src="/logo-full.png" alt="Caged Dragon Studios - Unleash Possibilities" className="studio-logo" width="150" height="150" />
         <p className="studio-credit">Built by Caged Dragon Studios</p>
         <p className="legal-links">
           <a href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>

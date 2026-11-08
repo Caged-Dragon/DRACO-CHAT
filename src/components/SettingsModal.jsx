@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import AccountSecurity from './AccountSecurity.jsx';
+import AdminReportsModal from './AdminReportsModal.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
-import { THEME_TABS, DARK_THEME, DEFAULT_THEME } from '../theme/fields.js';
+import { THEME_TABS } from '../theme/fields.js';
 import AppPreviewMock from './AppPreviewMock.jsx';
 
 export default function SettingsModal({ onClose }) {
-  const { theme, wallpaperUrl, updateTheme, uploadWallpaper, clearWallpaper, resetTheme } =
+  const { theme, defaults, mode, setMode, wallpaperUrl, updateTheme, uploadWallpaper, clearWallpaper, resetTheme } =
     useTheme();
   const [activeTab, setActiveTab] = useState(THEME_TABS[0].id);
   const [busy, setBusy] = useState(false);
@@ -14,6 +16,7 @@ export default function SettingsModal({ onClose }) {
   const fileInputRef = useRef(null);
   const { signOut } = useAuth();
   const [showDelete, setShowDelete] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -37,11 +40,11 @@ export default function SettingsModal({ onClose }) {
   async function handleDeleteAccount() {
     setDeleting(true);
     setDeleteError('');
-    const { data, error } = await supabase.functions.invoke('delete-account', {
+    const { data, error } = await supabase.functions.invoke('chat-delete-account', {
       body: { confirm: 'DELETE' },
     });
     if (error || data?.error) {
-      setDeleteError(data?.error || error?.message || 'Could not delete the account.');
+      setDeleteError(data?.error || error?.message || 'Could not delete your chat account.');
       setDeleting(false);
       return;
     }
@@ -64,17 +67,17 @@ export default function SettingsModal({ onClose }) {
           </button>
         </div>
 
-        <div className="preset-row">
-          <span className="dim small">Quick presets:</span>
-          <button type="button" className="preset-btn" onClick={() => updateTheme(DEFAULT_THEME)}>
-            ☀️ Light
-          </button>
-          <button type="button" className="preset-btn" onClick={() => updateTheme(DARK_THEME)}>
+        <div className="preset-row" role="group" aria-label="Appearance">
+          <span className="dim small">Appearance:</span>
+          <button type="button" className={`preset-btn ${mode === 'dark' ? 'active' : ''}`} aria-pressed={mode === 'dark'} onClick={() => setMode('dark')}>
             🌙 Dark
+          </button>
+          <button type="button" className={`preset-btn ${mode === 'light' ? 'active' : ''}`} aria-pressed={mode === 'light'} onClick={() => setMode('light')}>
+            ☀️ Light
           </button>
         </div>
 
-        <AppPreviewMock values={theme} wallpaperUrl={wallpaperUrl} />
+        <AppPreviewMock values={{ ...defaults, ...theme }} wallpaperUrl={wallpaperUrl} />
 
         <div className="theme-tabs">
           {THEME_TABS.map((t) => (
@@ -126,7 +129,7 @@ export default function SettingsModal({ onClose }) {
                   <span>{f.label}</span>
                   <input
                     type="color"
-                    value={theme[f.key] || f.default}
+                    value={theme[f.key] || defaults[f.key]}
                     onChange={(e) => handleColorChange(f.key, e.target.value)}
                   />
                 </label>
@@ -137,16 +140,20 @@ export default function SettingsModal({ onClose }) {
 
         {error && <p className="error-text">{error}</p>}
 
+        <AccountSecurity onOpenAdmin={() => setShowAdmin(true)} />
+        {showAdmin && <AdminReportsModal onClose={() => setShowAdmin(false)} />}
+
         <div className="danger-zone">
           {!showDelete ? (
             <button type="button" className="danger-link" onClick={() => setShowDelete(true)}>
-              Delete my account…
+              Delete my chat account…
             </button>
           ) : (
             <div className="danger-confirm">
               <p className="small">
-                This permanently deletes your profile, messages, files, statuses and friendships. Groups you
-                created are deleted for everyone. This cannot be undone.
+                This permanently deletes your Dragon Chat profile, messages, files, statuses and friendships.
+                Groups you created are deleted for everyone. Your Caged Dragon login and your accounts in
+                other Caged Dragon apps are not affected. This cannot be undone.
               </p>
               <input
                 type="text"

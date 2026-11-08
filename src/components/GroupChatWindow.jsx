@@ -3,13 +3,17 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useGroupCall } from '../contexts/GroupCallContext.jsx';
 import { useUnread } from '../contexts/UnreadContext.jsx';
+import PendingBubble from './PendingBubble.jsx';
+import { sendViaOutbox } from '../utils/outbox.js';
+import { useOutbox } from '../hooks/useOutbox.js';
+import { compressImage } from '../utils/image.js';
+import { uploadToBucket, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, safeFileName, formatBytes } from '../utils/upload.js';
+import { useVoiceRecorder, extensionForMime, formatClock } from '../hooks/useVoiceRecorder.js';
 import Avatar from './Avatar.jsx';
 import GifPicker, { gifsEnabled } from './GifPicker.jsx';
 import ForwardModal from './ForwardModal.jsx';
 import { linkifyParts, formatMessageTime, QUICK_EMOJIS, REACTION_EMOJIS } from '../utils/format.js';
-import { useViewportWidth } from '../hooks/useViewportWidth.js';
 
-const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const TYPING_STOP_DELAY = 3000;
 const PAGE_SIZE = 50;
 const DISAPPEAR_OPTIONS = [
@@ -41,6 +45,10 @@ export default function GroupChatWindow({ group, onBack }) {
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [attachError, setAttachError] = useState('');
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadName, setUploadName] = useState('');
+  const uploadAbortRef = useRef(null);
+  const voice = useVoiceRecorder({ onComplete: sendVoiceMessage, onError: setAttachError });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
@@ -54,6 +62,11 @@ export default function GroupChatWindow({ group, onBack }) {
   const [fetchedPinned, setFetchedPinned] = useState(null);
   const [addCandidates, setAddCandidates] = useState(null);
   const [panelError, setPanelError] = useState('');
+  const outbox = useOutbox(user.id);
+  const pendingHere = outbox.filter((i) => i.table === 'chat_group_messages' && i.row.group_id === group.id);
+  const [menuMsgId, setMenuMsgId] = useState(null);
+  const canHover =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
 
   const bottomRef = useRef(null);
   const listRef = useRef(null);
@@ -73,7 +86,7 @@ export default function GroupChatWindow({ group, onBack }) {
       .channel(`group-${group.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${group.id}` },
+        { event: 'INSERT', schema: 'public', table: 'chat_group_messages', filter: `group_id=eq.${group.id}` },
         (payload) => {
           // Realtime rows don't include the joined sender profile, so attach it here
           const senderProfile = membersRef.current.find((mm) => mm.id === payload.new.sender_id);
@@ -83,13 +96,13 @@ export default function GroupChatWindow({ group, onBack }) {
               ? { id: senderProfile.id, username: senderProfile.username, avatar_url: senderProfile.avatar_url }
               : undefined,
           };
-          setMessages((prev) => [...prev, withSender]);
+          setMessages((prev) => (prev.some((x) => x.id === withSender.id) ? prev : [...prev, withSender]));
           if (payload.new.sender_id !== user.id) markRead();
         }
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'group_messages', filter: `group_id=eq.${group.id}` },
+        { event: 'UPDATE', schema: 'public', table: 'chat_group_messages', filter: `group_id=eq.${group.id}` },
         (payload) => {
           setMessages((prev) => prev.map((m) => (m.id === payload.new.id ? { ...payload.new, sender: m.sender } : m)));
           setFetchedPinned((fp) =>
@@ -99,7 +112,7 @@ export default function GroupChatWindow({ group, onBack }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'group_message_reactions' },
+        { event: '*', schema: 'public', table: 'chat_group_message_reactions' },
         (payload) => {
           const row = payload.new?.id ? payload.new : payload.old;
           setReactionsByMessage((prev) => {
@@ -113,7 +126,7 @@ export default function GroupChatWindow({ group, onBack }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${group.id}` },
+        { event: '*', schema: 'public', table: 'chat_group_members', filter: `group_id=eq.${group.id}` },
         () => loadMembers()
       )
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
@@ -137,6 +150,16 @@ export default function GroupChatWindow({ group, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id]);
 
+  // On touch screens the message toolbar opens on tap; close it on any tap elsewhere
+  useEffect(() => {
+    if (menuMsgId === null || canHover) return undefined;
+    const close = (e) => {
+      if (!e.target.closest?.('.bubble-stack.menu-open')) setMenuMsgId(null);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [menuMsgId, canHover]);
+
   // Tell the unread tracker which group is open so its badge stays at zero
   useEffect(() => {
     setActiveGroup(group.id);
@@ -153,13 +176,13 @@ export default function GroupChatWindow({ group, onBack }) {
       return;
     }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, pendingHere.length]);
 
   async function loadMessages() {
     const nowIso = new Date().toISOString();
     const { data } = await supabase
-      .from('group_messages')
-      .select('*, sender:profiles!group_messages_sender_id_fkey(id, username, avatar_url)')
+      .from('chat_group_messages')
+      .select('*, sender:chat_profiles!chat_group_messages_sender_id_fkey(id, username, avatar_url)')
       .eq('group_id', group.id)
       .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
       .order('created_at', { ascending: false })
@@ -170,7 +193,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
     if (list.length) {
       const { data: reactions } = await supabase
-        .from('group_message_reactions')
+        .from('chat_group_message_reactions')
         .select('*')
         .in(
           'message_id',
@@ -186,8 +209,8 @@ export default function GroupChatWindow({ group, onBack }) {
 
     // Keep the pinned banner even if the pin is older than the first page
     const { data: pinned } = await supabase
-      .from('group_messages')
-      .select('*, sender:profiles!group_messages_sender_id_fkey(id, username, avatar_url)')
+      .from('chat_group_messages')
+      .select('*, sender:chat_profiles!chat_group_messages_sender_id_fkey(id, username, avatar_url)')
       .eq('group_id', group.id)
       .not('pinned_at', 'is', null)
       .is('deleted_at', null)
@@ -201,8 +224,8 @@ export default function GroupChatWindow({ group, onBack }) {
     if (loadingOlder || messages.length === 0) return;
     setLoadingOlder(true);
     const { data, error } = await supabase
-      .from('group_messages')
-      .select('*, sender:profiles!group_messages_sender_id_fkey(id, username, avatar_url)')
+      .from('chat_group_messages')
+      .select('*, sender:chat_profiles!chat_group_messages_sender_id_fkey(id, username, avatar_url)')
       .eq('group_id', group.id)
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
       .lt('created_at', messages[0].created_at)
@@ -216,7 +239,7 @@ export default function GroupChatWindow({ group, onBack }) {
       setHasMore(data.length === PAGE_SIZE);
       if (older.length) {
         const { data: rx } = await supabase
-          .from('group_message_reactions')
+          .from('chat_group_message_reactions')
           .select('*')
           .in('message_id', older.map((m) => m.id));
         if (rx?.length) {
@@ -235,8 +258,8 @@ export default function GroupChatWindow({ group, onBack }) {
 
   async function loadMembers() {
     const { data } = await supabase
-      .from('group_members')
-      .select('user_id, last_read_at, role, profiles(id, username, avatar_url)')
+      .from('chat_group_members')
+      .select('user_id, last_read_at, role, profiles:chat_profiles(id, username, avatar_url)')
       .eq('group_id', group.id);
     const list = (data || [])
       .map((r) => ({ ...r.profiles, last_read_at: r.last_read_at, role: r.role }))
@@ -249,7 +272,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
   async function loadGroupSettings() {
     const { data } = await supabase
-      .from('groups')
+      .from('chat_groups')
       .select('disappearing_seconds')
       .eq('id', group.id)
       .single();
@@ -266,7 +289,7 @@ export default function GroupChatWindow({ group, onBack }) {
   async function changeRole(memberId, role) {
     setPanelError('');
     const { error } = await supabase
-      .from('group_members')
+      .from('chat_group_members')
       .update({ role })
       .eq('group_id', group.id)
       .eq('user_id', memberId);
@@ -278,7 +301,7 @@ export default function GroupChatWindow({ group, onBack }) {
     if (!window.confirm(`Remove ${member.username} from this group?`)) return;
     setPanelError('');
     const { error } = await supabase
-      .from('group_members')
+      .from('chat_group_members')
       .delete()
       .eq('group_id', group.id)
       .eq('user_id', member.id);
@@ -289,7 +312,7 @@ export default function GroupChatWindow({ group, onBack }) {
   async function leaveGroup() {
     if (!window.confirm('Leave this group? You will stop receiving its messages.')) return;
     const { error } = await supabase
-      .from('group_members')
+      .from('chat_group_members')
       .delete()
       .eq('group_id', group.id)
       .eq('user_id', user.id);
@@ -299,7 +322,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
   async function deleteGroup() {
     if (!window.confirm('Delete this group for everyone? All of its messages will be removed. This cannot be undone.')) return;
-    const { error } = await supabase.from('groups').delete().eq('id', group.id);
+    const { error } = await supabase.from('chat_groups').delete().eq('id', group.id);
     if (error) setPanelError(error.message);
     else onBack();
   }
@@ -307,11 +330,11 @@ export default function GroupChatWindow({ group, onBack }) {
   async function openAddMembers() {
     setPanelError('');
     const { data, error } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .select(
         `requester_id, addressee_id,
-         requester:profiles!friendships_requester_id_fkey(id, username, avatar_url),
-         addressee:profiles!friendships_addressee_id_fkey(id, username, avatar_url)`
+         requester:chat_profiles!chat_friendships_requester_id_fkey(id, username, avatar_url),
+         addressee:chat_profiles!chat_friendships_addressee_id_fkey(id, username, avatar_url)`
       )
       .eq('status', 'accepted')
       .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
@@ -329,7 +352,7 @@ export default function GroupChatWindow({ group, onBack }) {
   async function addMember(friend) {
     setPanelError('');
     const { error } = await supabase
-      .from('group_members')
+      .from('chat_group_members')
       .insert({ group_id: group.id, user_id: friend.id });
     if (error) {
       setPanelError(error.message);
@@ -341,7 +364,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
   async function updateDisappearing(seconds) {
     setDisappearingSeconds(seconds);
-    await supabase.from('groups').update({ disappearing_seconds: seconds || null }).eq('id', group.id);
+    await supabase.from('chat_groups').update({ disappearing_seconds: seconds || null }).eq('id', group.id);
   }
 
   function handleTextChange(e) {
@@ -386,44 +409,90 @@ export default function GroupChatWindow({ group, onBack }) {
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
 
-    await supabase.from('group_messages').insert({
-      group_id: group.id,
-      sender_id: user.id,
-      content,
-      reply_to_id: replyingTo?.id ?? null,
-      mentions: mentionedIds,
-      expires_at: expiresAt,
-    });
-
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_group_messages',
+      {
+        group_id: group.id,
+        sender_id: user.id,
+        content,
+        reply_to_id: replyingTo?.id ?? null,
+        mentions: mentionedIds,
+        expires_at: expiresAt,
+      },
+      content
+    );
   }
 
   async function sendAttachmentMessage({ attachment_url, attachment_type, attachment_name }) {
     const expiresAt = disappearingSeconds
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
-    await supabase.from('group_messages').insert({
-      group_id: group.id,
-      sender_id: user.id,
-      attachment_url,
-      attachment_type,
-      attachment_name,
-      expires_at: expiresAt,
-    });
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_group_messages',
+      {
+        group_id: group.id,
+        sender_id: user.id,
+        attachment_url,
+        attachment_type,
+        attachment_name,
+        expires_at: expiresAt,
+      },
+      attachment_type === 'image' ? '📷 Photo' : attachment_type === 'gif' ? 'GIF' : `📎 ${attachment_name || 'Attachment'}`
+    );
   }
 
   async function handleAttachmentPick(e) {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setAttachError('File is too large (max 15MB).');
-      return;
-    }
+    if (!picked) return;
     setAttachError('');
     setUploading(true);
+    // Photos are shrunk before upload (faster, less data); other files go as-is
+    const file = await compressImage(picked, { maxDim: 1600, quality: 0.82 });
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachError(`That file is ${formatBytes(file.size)}. The limit is ${MAX_ATTACHMENT_LABEL}.`);
+      setUploading(false);
+      return;
+    }
 
-    const path = `${user.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from('chat-attachments').upload(path, file);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    setUploadName(file.name);
+    setUploadPct(0);
+    const path = `${user.id}/${Date.now()}-${safeFileName(file.name)}`;
+    const { error: uploadError } = await uploadToBucket({
+      bucket: 'chat-attachments',
+      path,
+      file,
+      onProgress: setUploadPct,
+      signal: controller.signal,
+    });
+    uploadAbortRef.current = null;
+    if (uploadError) {
+      if (!uploadError.cancelled) setAttachError(uploadError.message);
+      setUploading(false);
+      setUploadName('');
+      return;
+    }
+    const { data: pub } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+    await sendAttachmentMessage({
+      attachment_url: pub.publicUrl,
+      attachment_type: file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file',
+      attachment_name: file.name,
+    });
+    setUploading(false);
+    setUploadName('');
+  }
+
+  async function sendVoiceMessage({ blob, mime, duration }) {
+    setAttachError('');
+    setUploading(true);
+    const path = `${user.id}/${Date.now()}-voice-message.${extensionForMime(mime)}`;
+    const { error: uploadError } = await uploadToBucket({ bucket: 'chat-attachments', path, file: blob, contentType: mime });
     if (uploadError) {
       setAttachError(uploadError.message);
       setUploading(false);
@@ -432,8 +501,8 @@ export default function GroupChatWindow({ group, onBack }) {
     const { data: pub } = supabase.storage.from('chat-attachments').getPublicUrl(path);
     await sendAttachmentMessage({
       attachment_url: pub.publicUrl,
-      attachment_type: file.type.startsWith('image/') ? 'image' : 'file',
-      attachment_name: file.name,
+      attachment_type: 'audio',
+      attachment_name: `Voice message (${duration}s)`,
     });
     setUploading(false);
   }
@@ -445,18 +514,18 @@ export default function GroupChatWindow({ group, onBack }) {
 
   async function handleEdit(messageId, newContent) {
     await supabase
-      .from('group_messages')
+      .from('chat_group_messages')
       .update({ content: newContent, edited_at: new Date().toISOString() })
       .eq('id', messageId);
   }
 
   async function handleDelete(messageId) {
-    await supabase.from('group_messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
+    await supabase.from('chat_group_messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
   }
 
   async function handleTogglePin(message) {
     await supabase
-      .from('group_messages')
+      .from('chat_group_messages')
       .update({ pinned_at: message.pinned_at ? null : new Date().toISOString() })
       .eq('id', message.id);
   }
@@ -466,10 +535,10 @@ export default function GroupChatWindow({ group, onBack }) {
       (r) => r.user_id === user.id && r.emoji === emoji
     );
     if (existing) {
-      await supabase.from('group_message_reactions').delete().eq('id', existing.id);
+      await supabase.from('chat_group_message_reactions').delete().eq('id', existing.id);
     } else {
       await supabase
-        .from('group_message_reactions')
+        .from('chat_group_message_reactions')
         .insert({ message_id: messageId, user_id: user.id, emoji });
     }
   }
@@ -495,39 +564,14 @@ export default function GroupChatWindow({ group, onBack }) {
       ? members.filter((m) => m.id !== user.id && m.last_read_at >= lastMessage.created_at).length
       : null;
 
-  const viewportWidth = useViewportWidth();
-  const isSmall = viewportWidth <= 400;
-  const isMobile = viewportWidth <= 640;
-
-  const headerStyle = isMobile
-    ? { padding: isSmall ? '8px 10px' : '10px 14px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-  const iconBtnStyle = isMobile
-    ? { fontSize: isSmall ? 13 : 15, padding: '4px 2px', flexShrink: 0 }
-    : undefined;
-  const nameWrapStyle = isMobile
-    ? { minWidth: 0, flex: '1 1 auto', overflow: 'hidden', cursor: 'pointer' }
-    : { cursor: 'pointer' };
-  const nameTextStyle = isMobile
-    ? { fontSize: isSmall ? 13 : 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-    : undefined;
-  const inputRowStyle = isMobile
-    ? { padding: isSmall ? '8px' : '10px 12px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-  const textInputStyle = { flex: '1 1 auto', minWidth: 0 };
-  const sendBtnStyle = isMobile
-    ? { padding: isSmall ? '8px 12px' : '9px 16px', fontSize: isSmall ? 13 : 14, flexShrink: 0, whiteSpace: 'nowrap' }
-    : { flexShrink: 0 };
-  const attachIconStyle = isMobile ? { fontSize: isSmall ? 16 : 18, flexShrink: 0 } : { flexShrink: 0 };
-
   return (
     <div className="chat-window">
-      <div className="chat-header" style={headerStyle}>
-        <button className="back-btn" onClick={onBack} aria-label="Back" style={iconBtnStyle}>
+      <div className="chat-header">
+        <button className="back-btn" onClick={onBack} aria-label="Back">
           ←
         </button>
-        <div className="chat-header-name" onClick={() => setShowMembers((s) => !s)} style={nameWrapStyle}>
-          <div style={nameTextStyle}>👥 {group.name}</div>
+        <div className="chat-header-name" onClick={() => setShowMembers((s) => !s)}>
+          <div>👥 {group.name}</div>
           <div className="chat-header-sub">
             {typingNames.length > 0 ? `${typingNames.join(', ')} typing...` : `${members.length} members`}
           </div>
@@ -537,7 +581,7 @@ export default function GroupChatWindow({ group, onBack }) {
           onClick={() => joinCall(group, 'audio')}
           disabled={!!activeCall}
           aria-label="Group voice call"
-          style={iconBtnStyle}
+         
         >
           📞
         </button>
@@ -546,7 +590,7 @@ export default function GroupChatWindow({ group, onBack }) {
           onClick={() => joinCall(group, 'video')}
           disabled={!!activeCall}
           aria-label="Group video call"
-          style={iconBtnStyle}
+         
         >
           🎥
         </button>
@@ -623,6 +667,7 @@ export default function GroupChatWindow({ group, onBack }) {
           <div className="disappearing-row">
             <span>⏱ Disappearing messages</span>
             <select
+              aria-label="Disappearing messages timer"
               value={disappearingSeconds}
               disabled={!isAdmin}
               onChange={(e) => updateDisappearing(Number(e.target.value))}
@@ -639,7 +684,7 @@ export default function GroupChatWindow({ group, onBack }) {
 
       {pinnedMessage && (
         <div className="pinned-banner">
-          📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}
+          <span className="pinned-text">📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}</span>
           <button onClick={() => handleTogglePin(pinnedMessage)}>Unpin</button>
         </div>
       )}
@@ -656,6 +701,53 @@ export default function GroupChatWindow({ group, onBack }) {
           const isLastOfMine = isMine && idx === messages.length - 1;
           return (
             <div key={m.id} className={`bubble-row ${isMine ? 'mine' : 'theirs'}`}>
+              <div
+                className={`bubble-stack${menuMsgId === m.id ? ' menu-open' : ''}`}
+                onMouseEnter={canHover ? () => setMenuMsgId(m.id) : undefined}
+                onMouseLeave={canHover ? () => setMenuMsgId((id) => (id === m.id ? null : id)) : undefined}
+                onClick={
+                  canHover
+                    ? undefined
+                    : (e) => {
+                        if (e.target.closest('a, button, input, audio')) return;
+                        setMenuMsgId((id) => (id === m.id ? null : m.id));
+                      }
+                }
+              >
+                {menuMsgId === m.id && !m.deleted_at && (
+                  <div className="bubble-hover-actions">
+                    {REACTION_EMOJIS.slice(0, 3).map((e) => (
+                      <button key={e} onClick={() => handleReact(m.id, e)} title="React">
+                        {e}
+                      </button>
+                    ))}
+                    <button onClick={() => setReplyingTo(m)} title="Reply">
+                      ↩
+                    </button>
+                    <button onClick={() => setForwardingMessage(m)} title="Forward">
+                      ➡️
+                    </button>
+                    <button onClick={() => handleTogglePin(m)} title={m.pinned_at ? 'Unpin' : 'Pin'}>
+                      📌
+                    </button>
+                    {isMine && m.content && (
+                      <button
+                        onClick={() => {
+                          const next = prompt('Edit message', m.content);
+                          if (next && next.trim()) handleEdit(m.id, next.trim());
+                        }}
+                        title="Edit"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                    {isMine && (
+                      <button onClick={() => handleDelete(m.id)} title="Delete">
+                        🗑
+                      </button>
+                    )}
+                  </div>
+                )}
               <div className={`bubble ${isMine ? 'mine' : 'theirs'}`}>
                 {!isMine && <div className="group-sender-name">{m.sender?.username}</div>}
                 {quoted && (
@@ -739,48 +831,27 @@ export default function GroupChatWindow({ group, onBack }) {
                   <div className="seen-by-text">{seenByCount > 0 ? `Seen by ${seenByCount}` : 'Sent'}</div>
                 )}
 
-                {!m.deleted_at && (
-                  <div className="bubble-hover-actions">
-                    {REACTION_EMOJIS.slice(0, 3).map((e) => (
-                      <button key={e} onClick={() => handleReact(m.id, e)} title="React">
-                        {e}
-                      </button>
-                    ))}
-                    <button onClick={() => setReplyingTo(m)} title="Reply">
-                      ↩
-                    </button>
-                    <button onClick={() => setForwardingMessage(m)} title="Forward">
-                      ➡️
-                    </button>
-                    <button onClick={() => handleTogglePin(m)} title={m.pinned_at ? 'Unpin' : 'Pin'}>
-                      📌
-                    </button>
-                    {isMine && m.content && (
-                      <button
-                        onClick={() => {
-                          const next = prompt('Edit message', m.content);
-                          if (next && next.trim()) handleEdit(m.id, next.trim());
-                        }}
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
-                    )}
-                    {isMine && (
-                      <button onClick={() => handleDelete(m.id)} title="Delete">
-                        🗑
-                      </button>
-                    )}
-                  </div>
-                )}
+              </div>
               </div>
             </div>
           );
         })}
+        {pendingHere.map((p) => <PendingBubble key={p.id} item={p} userId={user.id} />)}
         <div ref={bottomRef} />
       </div>
 
       {attachError && <p className="error-text attach-error">{attachError}</p>}
+
+      {uploading && uploadName && (
+        <div className="upload-progress" role="status" aria-live="polite">
+          <div className="upload-progress-info">
+            <span className="upload-progress-name">{uploadName}</span>
+            <span className="upload-progress-pct">{uploadPct}%</span>
+          </div>
+          <div className="upload-progress-bar"><span style={{ width: `${uploadPct}%` }} /></div>
+          <button type="button" className="upload-progress-cancel" onClick={() => uploadAbortRef.current?.abort()} aria-label="Cancel upload">✕</button>
+        </div>
+      )}
 
       {replyingTo && (
         <div className="reply-preview">
@@ -805,21 +876,31 @@ export default function GroupChatWindow({ group, onBack }) {
         </div>
       )}
 
-      <form className="chat-input" onSubmit={sendMessage} style={inputRowStyle}>
+      <form className="chat-input" onSubmit={sendMessage}>
+        {voice.recording ? (
+          <div className="voice-recording-bar" role="status" aria-live="polite">
+            <button type="button" className="voice-rec-cancel" onClick={voice.cancel} aria-label="Cancel recording">🗑️</button>
+            <span className="voice-rec-dot" aria-hidden="true" />
+            <span className="voice-rec-time">{formatClock(voice.seconds)}</span>
+            <span className="voice-rec-hint">Recording…</span>
+            <button type="button" className="voice-rec-send" onClick={voice.stop} aria-label="Send voice message">Send ➤</button>
+          </div>
+        ) : (
+          <>
         <button
           type="button"
           className="attach-btn"
           onClick={() => setShowEmojiPicker((s) => !s)}
-          style={attachIconStyle}
+         
         >
           😊
         </button>
         {gifsEnabled && (
         <button
           type="button"
-          className="attach-btn"
+          className="attach-btn gif-btn"
           onClick={() => setShowGifPicker((s) => !s)}
-          style={attachIconStyle}
+          aria-label="Send GIF"
         >
           GIF
         </button>
@@ -829,14 +910,18 @@ export default function GroupChatWindow({ group, onBack }) {
           className="attach-btn"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          style={attachIconStyle}
+         
         >
           {uploading ? '…' : '📎'}
         </button>
+        {voice.supported && (
+          <button type="button" className="attach-btn" onClick={voice.start} disabled={uploading} aria-label="Record voice message">
+            🎙️
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,application/pdf,.doc,.docx,.txt,.zip"
           onChange={handleAttachmentPick}
           hidden
         />
@@ -845,11 +930,13 @@ export default function GroupChatWindow({ group, onBack }) {
           placeholder="Message the group... (@ to mention)"
           value={text}
           onChange={handleTextChange}
-          style={textInputStyle}
+         
         />
-        <button type="submit" style={sendBtnStyle}>
+        <button type="submit">
           Send
         </button>
+          </>
+        )}
       </form>
 
       {showEmojiPicker && (

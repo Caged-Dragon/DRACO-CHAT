@@ -11,6 +11,8 @@ import { GroupCallProvider } from './contexts/GroupCallContext.jsx';
 import { StatusProvider } from './contexts/StatusContext.jsx';
 import { installErrorReporter } from './utils/errorReporter.js';
 import './styles.css';
+import './layout.css';
+import './chat-ui.css';
 
 installErrorReporter();
 

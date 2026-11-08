@@ -26,7 +26,7 @@ export function UnreadProvider({ children }) {
       .channel(`unread-${user.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` },
+        { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `receiver_id=eq.${user.id}` },
         (payload) => {
           const senderId = payload.new.sender_id;
           setCounts((prev) => ({ ...prev, [senderId]: (prev[senderId] || 0) + 1 }));
@@ -34,7 +34,7 @@ export function UnreadProvider({ children }) {
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'group_messages' },
+        { event: 'INSERT', schema: 'public', table: 'chat_group_messages' },
         (payload) => {
           const m = payload.new;
           if (m.sender_id === user.id || m.deleted_at) return;
@@ -66,7 +66,7 @@ export function UnreadProvider({ children }) {
 
   async function loadCounts() {
     const { data, error } = await supabase
-      .from('messages')
+      .from('chat_messages')
       .select('sender_id')
       .eq('receiver_id', user.id)
       .is('read_at', null);
@@ -80,7 +80,7 @@ export function UnreadProvider({ children }) {
   }
 
   async function loadGroupCounts() {
-    const { data, error } = await supabase.rpc('group_unread_counts');
+    const { data, error } = await supabase.rpc('chat_group_unread_counts');
     if (error) return;
     const next = {};
     (data || []).forEach((row) => {
@@ -100,7 +100,7 @@ export function UnreadProvider({ children }) {
     });
 
     await supabase
-      .from('messages')
+      .from('chat_messages')
       .update({ read_at: new Date().toISOString() })
       .eq('sender_id', friendId)
       .eq('receiver_id', user.id)
@@ -117,7 +117,7 @@ export function UnreadProvider({ children }) {
       });
       if (!user) return;
       await supabase
-        .from('group_members')
+        .from('chat_group_members')
         .update({ last_read_at: new Date().toISOString() })
         .eq('group_id', groupId)
         .eq('user_id', user.id);

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { linkifyParts, formatMessageTime, REACTION_EMOJIS } from '../utils/format.js';
+import VoicePlayer from './VoicePlayer.jsx';
 
 export default function MessageBubble({
   message,
@@ -19,6 +20,22 @@ export default function MessageBubble({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.content || '');
+  const stackRef = useRef(null);
+  // Mouse/trackpad: toolbar follows hover. Touch: toolbar opens on tap.
+  const canHover =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
+
+  useEffect(() => {
+    if (!showMenu || canHover) return undefined;
+    const close = (e) => {
+      if (stackRef.current && !stackRef.current.contains(e.target)) {
+        setShowMenu(false);
+        setShowReactionPicker(false);
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [showMenu, canHover]);
 
   const isDeleted = !!message.deleted_at;
 
@@ -39,13 +56,71 @@ export default function MessageBubble({
   return (
     <div className={`bubble-row ${isMine ? 'mine' : 'theirs'}`}>
       <div
-        className={`bubble ${isMine ? 'mine' : 'theirs'} ${highlight ? 'highlighted' : ''}`}
-        onMouseEnter={() => setShowMenu(true)}
-        onMouseLeave={() => {
-          setShowMenu(false);
-          setShowReactionPicker(false);
-        }}
+        ref={stackRef}
+        className={`bubble-stack${showMenu ? ' menu-open' : ''}`}
+        onMouseEnter={canHover ? () => setShowMenu(true) : undefined}
+        onMouseLeave={
+          canHover
+            ? () => {
+                setShowMenu(false);
+                setShowReactionPicker(false);
+              }
+            : undefined
+        }
+        onClick={
+          canHover
+            ? undefined
+            : (e) => {
+                if (e.target.closest('a, button, input, audio, video, [role="slider"]')) return;
+                setShowMenu((v) => !v);
+              }
+        }
       >
+          {showMenu && !isDeleted && (
+            <div className="bubble-hover-actions">
+              <button onClick={() => setShowReactionPicker((s) => !s)} title="React">
+                😊
+              </button>
+              <button onClick={onReply} title="Reply">
+                ↩
+              </button>
+              <button onClick={onForward} title="Forward">
+                ➡️
+              </button>
+              <button onClick={onTogglePin} title={message.pinned_at ? 'Unpin' : 'Pin'}>
+                📌
+              </button>
+              {isMine && (
+                <>
+                  {message.content && (
+                    <button onClick={() => setEditing(true)} title="Edit">
+                      ✏️
+                    </button>
+                  )}
+                  <button onClick={onDelete} title="Delete">
+                    🗑
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {showReactionPicker && (
+            <div className="reaction-picker">
+              {REACTION_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => {
+                    onReact(e);
+                    setShowReactionPicker(false);
+                  }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+        <div className={`bubble ${isMine ? 'mine' : 'theirs'} ${highlight ? 'highlighted' : ''}`}>
         {quotedMessage && (
           <div className="bubble-quote">
             <span className="bubble-quote-text">
@@ -68,6 +143,9 @@ export default function MessageBubble({
         {!isDeleted && message.attachment_type === 'gif' && (
           <img src={message.attachment_url} alt="GIF" className="message-image" />
         )}
+        {!isDeleted && message.attachment_type === 'video' && (
+          <video controls preload="metadata" playsInline src={message.attachment_url} className="message-video" />
+        )}
         {!isDeleted && message.attachment_type === 'file' && (
           <a
             href={message.attachment_url}
@@ -75,11 +153,13 @@ export default function MessageBubble({
             rel="noopener noreferrer"
             className="message-file"
           >
-            📄 {message.attachment_name}
+            <span className="message-file-icon" aria-hidden="true">📄</span>
+            <span className="message-file-name">{message.attachment_name}</span>
+            <span className="message-file-action" aria-hidden="true">⬇</span>
           </a>
         )}
         {!isDeleted && message.attachment_type === 'audio' && (
-          <audio controls src={message.attachment_url} className="message-audio" />
+          <VoicePlayer src={message.attachment_url} label={message.attachment_name} mine={isMine} />
         )}
 
         {isDeleted ? (
@@ -142,50 +222,7 @@ export default function MessageBubble({
           </div>
         )}
 
-        {showMenu && !isDeleted && (
-          <div className="bubble-hover-actions">
-            <button onClick={() => setShowReactionPicker((s) => !s)} title="React">
-              😊
-            </button>
-            <button onClick={onReply} title="Reply">
-              ↩
-            </button>
-            <button onClick={onForward} title="Forward">
-              ➡️
-            </button>
-            <button onClick={onTogglePin} title={message.pinned_at ? 'Unpin' : 'Pin'}>
-              📌
-            </button>
-            {isMine && (
-              <>
-                {message.content && (
-                  <button onClick={() => setEditing(true)} title="Edit">
-                    ✏️
-                  </button>
-                )}
-                <button onClick={onDelete} title="Delete">
-                  🗑
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {showReactionPicker && (
-          <div className="reaction-picker">
-            {REACTION_EMOJIS.map((e) => (
-              <button
-                key={e}
-                onClick={() => {
-                  onReact(e);
-                  setShowReactionPicker(false);
-                }}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

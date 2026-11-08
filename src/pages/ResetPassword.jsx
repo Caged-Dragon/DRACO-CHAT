@@ -1,4 +1,6 @@
+import ThemeToggle from '../components/ThemeToggle.jsx';
 import { useState } from 'react';
+import { friendlyAuthError } from '../utils/authErrors.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
 export default function ResetPassword() {
@@ -26,7 +28,7 @@ export default function ResetPassword() {
     setBusy(false);
 
     if (error) {
-      setError(error.message);
+      setError(friendlyAuthError(error));
     } else {
       // Sign out so the user logs back in fresh with the new password
       await signOut();
@@ -35,6 +37,7 @@ export default function ResetPassword() {
 
   return (
     <div className="center-screen">
+        <ThemeToggle className="floating" />
       <form className="auth-card" onSubmit={handleSubmit}>
         <img src="/logo.png" alt="Dragon Chat" className="auth-logo" />
         <h1>Set a new password</h1>

@@ -17,12 +17,12 @@ export default function ForwardModal({ message, onClose }) {
 
   async function loadTargets() {
     const { data: friendRows } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .select(
         `
         requester_id, addressee_id,
-        requester:profiles!friendships_requester_id_fkey(id, username, avatar_url),
-        addressee:profiles!friendships_addressee_id_fkey(id, username, avatar_url)
+        requester:chat_profiles!chat_friendships_requester_id_fkey(id, username, avatar_url),
+        addressee:chat_profiles!chat_friendships_addressee_id_fkey(id, username, avatar_url)
       `
       )
       .eq('status', 'accepted')
@@ -33,8 +33,8 @@ export default function ForwardModal({ message, onClose }) {
     );
 
     const { data: groupRows } = await supabase
-      .from('group_members')
-      .select('groups(id, name)')
+      .from('chat_group_members')
+      .select('groups:chat_groups(id, name)')
       .eq('user_id', user.id);
     setGroups((groupRows || []).map((r) => r.groups).filter(Boolean));
   }
@@ -42,7 +42,7 @@ export default function ForwardModal({ message, onClose }) {
   async function forwardToFriend(friendId) {
     setBusy(true);
     setError('');
-    const { error } = await supabase.from('messages').insert({
+    const { error } = await supabase.from('chat_messages').insert({
       sender_id: user.id,
       receiver_id: friendId,
       content: message.content || null,
@@ -58,7 +58,7 @@ export default function ForwardModal({ message, onClose }) {
   async function forwardToGroup(groupId) {
     setBusy(true);
     setError('');
-    const { error } = await supabase.from('group_messages').insert({
+    const { error } = await supabase.from('chat_group_messages').insert({
       group_id: groupId,
       sender_id: user.id,
       content: message.content || null,

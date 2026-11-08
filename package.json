@@ -1,25 +1,30 @@
 {
   "name": "dragon-chat",
   "private": true,
-  "version": "5.8.0",
+  "version": "5.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "types": "supabase gen types typescript --project-id seqituyzlemxvexgntma > src/types/database.types.ts"
+    "types": "supabase gen types typescript --project-id gbeurqibcfvquacasofq > src/types/database.types.ts",
+    "test:calls": "node tests/call/build.mjs && python3 tests/call/call_e2e.py && python3 tests/call/group_e2e.py",
+    "test:ui": "python3 tests/ui/overlap.py && python3 tests/ui/a11y.py && python3 tests/ui/features.py",
+    "test:all": "npm test && npm run test:ui && npm run test:calls"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tus-js-client": "^4.2.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
+    "axe-core": "^4.14.0",
     "vite": "^5.4.8",
     "vite-plugin-pwa": "^0.20.5",
-    "workbox-precaching": "^7.1.0",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "workbox-precaching": "^7.1.0"
   }
 }

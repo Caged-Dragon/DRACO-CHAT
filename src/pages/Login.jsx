@@ -1,4 +1,6 @@
+import ThemeToggle from '../components/ThemeToggle.jsx';
 import { useState } from 'react';
+import { friendlyAuthError } from '../utils/authErrors.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
 const MODES = {
@@ -39,7 +41,7 @@ export default function Login({ onBackToLanding }) {
           setUnconfirmed(true);
           setError('Please confirm your email before logging in.');
         } else {
-          setError(error.message);
+          setError(friendlyAuthError(error));
         }
       }
     } else if (mode === MODES.SIGNUP) {
@@ -50,7 +52,7 @@ export default function Login({ onBackToLanding }) {
       }
       const { data, error } = await signUp(email, password, username.trim());
       if (error) {
-        setError(error.message);
+        setError(friendlyAuthError(error));
       } else if (data?.user && !data?.session) {
         // Email confirmation is required — no session yet
         setMode(MODES.CHECK_EMAIL);
@@ -66,7 +68,7 @@ export default function Login({ onBackToLanding }) {
       }
       const { error } = await sendPasswordReset(email.trim());
       if (error) {
-        setError(error.message);
+        setError(friendlyAuthError(error));
       } else {
         setMode(MODES.FORGOT_SENT);
       }
@@ -79,7 +81,7 @@ export default function Login({ onBackToLanding }) {
     resetMessages();
     setBusy(true);
     const { error } = await resendConfirmation(email);
-    if (error) setError(error.message);
+    if (error) setError(friendlyAuthError(error));
     else setInfo('Confirmation email resent — check your inbox.');
     setBusy(false);
   }
@@ -87,14 +89,15 @@ export default function Login({ onBackToLanding }) {
   async function handleOAuth(provider) {
     resetMessages();
     const { error } = await signInWithProvider(provider);
-    if (error) setError(error.message);
+    if (error) setError(friendlyAuthError(error));
     // On success, Supabase redirects away — nothing else to do here.
   }
 
   // --- "Check your email" screen after signup ---
   if (mode === MODES.CHECK_EMAIL) {
     return (
-      <div className="center-screen">
+      <div className="center-screen" role="main">
+        <ThemeToggle className="floating" />
         <div className="auth-card">
           <img src="/logo.png" alt="Dragon Chat" className="auth-logo" />
           <h1>Check your email</h1>
@@ -119,7 +122,8 @@ export default function Login({ onBackToLanding }) {
   // --- "Reset link sent" screen ---
   if (mode === MODES.FORGOT_SENT) {
     return (
-      <div className="center-screen">
+      <div className="center-screen" role="main">
+        <ThemeToggle className="floating" />
         <div className="auth-card">
           <img src="/logo.png" alt="Dragon Chat" className="auth-logo" />
           <h1>Check your email</h1>
@@ -140,7 +144,8 @@ export default function Login({ onBackToLanding }) {
   const isSignup = mode === MODES.SIGNUP;
 
   return (
-    <div className="center-screen">
+    <div className="center-screen" role="main">
+        <ThemeToggle className="floating" />
       {onBackToLanding && (
         <span className="back-to-landing" onClick={onBackToLanding}>
           ← Home

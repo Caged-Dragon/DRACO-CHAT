@@ -3,21 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#8b5cf6" />
+  <meta name="theme-color" content="#000000" />
   <meta name="description" content="Dragon Chat Privacy Policy — how Caged Dragon Studios collects, uses and protects your information." />
-  <link rel="icon" type="image/png" href="/logo.png" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <script>
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('dragonchat.mode') === 'light' ? 'light' : 'dark'); }
+    catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+  </script>
   <title>Privacy Policy — Dragon Chat</title>
   <style>
-    :root { --bg:#f6f3ff; --panel:#fff; --border:#e6def7; --text:#241a3d; --dim:#7c718f; --purple:#8b5cf6;
-            --gradient:linear-gradient(135deg,#ef4444 0%,#f97316 50%,#8b5cf6 100%); }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#14101f; --panel:#1d1830; --border:#322a4d; --text:#efeaff; --dim:#a79cc2; }
-    }
+    :root { --bg:#050505; --panel:#111113; --border:#2c271a; --text:#f6efdc; --dim:#a99f85; --purple:#f0c14b;
+            --header-bg:linear-gradient(135deg,#000000 0%,#1a1405 100%); --header-text:#f6efdc; color-scheme:dark; }
+    :root[data-theme='light'] { --bg:#f6efd9; --panel:#fffdf5; --border:#d9cb9d; --text:#15110a; --dim:#6a5d3a; --purple:#8a5a00;
+            --header-bg:linear-gradient(135deg,#f6c94b 0%,#d9a02a 55%,#b8801c 100%); --header-text:#15110a; color-scheme:light; }
     * { box-sizing: border-box; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.65; }
-    header { background:var(--gradient); color:#fff; padding:28px 20px; }
+    header { background:var(--header-bg); color:var(--header-text); padding:28px 20px; border-bottom:2px solid var(--purple); }
     .wrap { max-width:820px; margin:0 auto; }
-    .brand { display:flex; align-items:center; gap:12px; text-decoration:none; color:#fff; font-weight:800; font-size:20px; }
+    .brand { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--header-text); font-weight:800; font-size:20px; }
     .brand img { width:36px; height:36px; border-radius:10px; }
     header h1 { margin:18px 0 4px; font-size:32px; }
     header p { margin:0; opacity:.92; }
@@ -46,7 +49,7 @@
     <div class="wrap">
       <a class="brand" href="/"><img src="/logo.png" alt="" />Dragon Chat</a>
       <h1>Privacy Policy</h1>
-      <p>Effective date: 24 October 2026 &middot; Last updated: 24 October 2026</p>
+      <p>Effective date: 24 October 2026 &middot; Last updated: 26 October 2026</p>
     </div>
   </header>
 
@@ -91,7 +94,7 @@
           <li><strong>Profile details:</strong> avatar picture, status message and presence status (online, away, busy, do not disturb, offline).</li>
           <li><strong>Content you create:</strong> text messages, replies, edits, reactions, pinned messages, GIFs, voice messages, photos and files you attach, group names and pictures, and 24-hour statuses (text or image).</li>
           <li><strong>Social connections:</strong> friend requests and friendships, group memberships, and people you block.</li>
-          <li><strong>Reports:</strong> if you report a user or message, the reason you provide and the related message reference.</li>
+          <li><strong>Reports:</strong> if you report a user or message, the reason you provide and the related message reference. Reports are reviewed by Dragon Chat administrators, who can see the report and the reported message and may add a private note. If a report is upheld an administrator may suspend the reported account (a suspended account can still read its chats but cannot send new messages, friend requests or statuses).</li>
           <li><strong>Preferences:</strong> theme colours, chat wallpapers, per-chat settings such as disappearing-message timers, and mute or archive choices.</li>
         </ul>
 
@@ -102,6 +105,7 @@
           <li><strong>Push notification data:</strong> if you enable notifications, your browser gives us a push subscription (an endpoint address and encryption keys) so we can deliver notifications to your device. Our servers send these notifications automatically when you receive a message: the notification shows the sender’s name (or group name) and a short preview of the message, and travels through your browser vendor’s push service. You can mute any chat to stop its notifications.</li>
           <li><strong>Technical data:</strong> an account identifier and numeric user number, session tokens stored in your browser, and standard server logs (such as IP address, browser type and request times) kept by our infrastructure providers for security and reliability.</li>
           <li><strong>Error reports:</strong> if the app hits an unexpected error while you are signed in, it may send us a short report containing the error message, a technical stack trace, the page path, your browser type and the app version, linked to your account. We use these only to find and fix bugs and delete them automatically after 30 days.</li>
+          <li><strong>Unsent messages:</strong> if you are offline, messages you write are kept in your browser’s local storage on your own device until they can be delivered. They are removed once sent, or when you sign out.</li>
         </ul>
 
         <h3>Information we do not collect</h3>
@@ -119,7 +123,7 @@
             <tr><td>Legal compliance</td><td>Meet legal obligations and respond to valid legal requests.</td></tr>
           </tbody>
         </table>
-        <p>We process your information because it is necessary to provide the service you asked for, because you have given consent (for example, enabling notifications or camera and microphone access), and for our legitimate interests in keeping Dragon Chat safe and working. We do not sell your personal information, and we do not use your messages for advertising or to train advertising profiles.</p>
+        <p>We process your information because it is necessary to provide the service you asked for, because you have given consent (for example, enabling notifications or camera and microphone access), and for our legitimate interests in keeping Dragon Chat safe and working. We do not sell your personal information, and we do not use your messages for advertising or to train advertising profiles. Photos you attach, and profile and wallpaper pictures, are resized and compressed on your device before they are uploaded.</p>
 
         <h2 id="visibility">3. Who can see your information</h2>
         <ul>
@@ -139,7 +143,7 @@
             <tr><td>Hosting provider (for example Vercel)</td><td>Serves the Dragon Chat website and app.</td><td>Standard request logs (IP address, browser, pages requested).</td></tr>
             <tr><td>Google / GitHub (optional)</td><td>Sign-in if you choose “Continue with Google/GitHub”.</td><td>Your email and profile name, under their own privacy policies.</td></tr>
             <tr><td>GIPHY</td><td>Trending and searched GIFs in the GIF picker (the picker is only available when enabled).</td><td>The search words you type and your IP address, sent directly from your browser to GIPHY when you open or search the picker. GIPHY’s own privacy policy applies.</td></tr>
-            <tr><td>Google STUN servers (and an optional TURN relay)</td><td>Help your device connect to your friend’s device for calls.</td><td>Network address information (such as your IP address) needed to set up a call.</td></tr>
+            <tr><td>Public STUN servers (Google, Cloudflare) and, when enabled, a TURN relay provider</td><td>Help your device connect to your friend’s device for calls. A TURN relay forwards the encrypted call media when a direct connection isn’t possible (for example on some mobile networks).</td><td>Network address information (such as your IP address) needed to set up a call. If a relay is used, the encrypted call traffic passes through it.</td></tr>
             <tr><td>Browser push services (Google, Apple, Mozilla, Microsoft)</td><td>Deliver push notifications to your device.</td><td>Notification title and text, routed through your browser vendor’s push service.</td></tr>
             <tr><td>Email delivery</td><td>Send verification and password-reset emails.</td><td>Your email address and the message content.</td></tr>
           </tbody>
@@ -147,7 +151,7 @@
         <p>We may also disclose information if required by law, to protect the safety or rights of users or the public, to investigate abuse, or as part of a merger, acquisition or sale of the service (in which case we will tell you and the new owner must honour this policy).</p>
 
         <h2 id="calls">5. Voice and video calls</h2>
-        <p>Calls use WebRTC, which tries to connect your device directly to the other participant’s device. To do this, the participants’ IP addresses are exchanged through our signalling and the STUN/TURN servers listed above, which means the person you call can technically learn your IP address. Dragon Chat asks your browser for permission to use your microphone and camera; you can revoke this at any time in your browser or device settings. Audio and video are not recorded or stored by us.</p>
+        <p>Calls use WebRTC, which tries to connect your device directly to the other participant’s device. To do this, the participants’ IP addresses are exchanged through our signalling and the STUN/TURN servers listed above, which means the person you call can technically learn your IP address. Dragon Chat asks your browser for permission to use your microphone and camera; you can revoke this at any time in your browser or device settings. Audio and video are not recorded or stored by us. During a call your browser measures connection quality (delay, packet loss) on your device to show a signal indicator and to pause video automatically on a poor connection; these measurements are not sent to us. To keep calls from dropping, the app asks your device to keep the screen awake while a call is active, and may show a system notification for an incoming call if you have allowed notifications. Call sounds (ringtone and ringback) are generated on your device.</p>
 
         <h2 id="retention">6. Retention &amp; deletion</h2>
         <ul>
@@ -160,11 +164,11 @@
         </ul>
 
         <h2 id="security">7. Security</h2>
-        <p>We use industry-standard safeguards, including encrypted connections, row-level access controls in our database so users can only reach data they are entitled to, per-user storage folders, and restricted access to administrative systems. No online service can be completely secure, so we cannot guarantee absolute security. Please choose a strong, unique password, keep your device secure and tell us immediately if you suspect unauthorised access.</p>
+        <p>We use industry-standard safeguards, including encrypted connections, row-level access controls in our database so users can only reach data they are entitled to, per-user storage folders, and restricted access to administrative systems. No online service can be completely secure, so we cannot guarantee absolute security. You can add a second step to signing in (an authenticator app) under <em>Settings → Account &amp; privacy → Two-step verification</em>; once it is on, your data cannot be accessed without that step. Please choose a strong, unique password, keep your device secure and tell us immediately if you suspect unauthorised access.</p>
 
         <h2 id="rights">8. Your choices &amp; rights</h2>
         <ul>
-          <li><strong>Access and correct:</strong> you can view and edit your username, avatar and status message in the app.</li>
+          <li><strong>Access and correct:</strong> you can view and edit your username, avatar and status message in the app, and download a copy of your data (profile, friends, messages, groups, statuses and calls) as a file under <em>Settings → Account &amp; privacy → Download my data</em>.</li>
           <li><strong>Notifications:</strong> turn push notifications on or off in the app or your browser settings.</li>
           <li><strong>Permissions:</strong> control microphone, camera and notification access in your browser or device settings.</li>
           <li><strong>Visibility:</strong> set your presence status, block users, and use disappearing messages.</li>

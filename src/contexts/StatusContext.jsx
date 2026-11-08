@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from './AuthContext.jsx';
 
 const StatusContext = createContext(null);
@@ -18,8 +19,8 @@ export function StatusProvider({ children }) {
     // RLS already restricts this to: my own statuses, plus active
     // (not-yet-expired) statuses from accepted friends.
     const { data, error } = await supabase
-      .from('statuses')
-      .select('*, user:profiles(id, username, avatar_url)')
+      .from('chat_statuses')
+      .select('*, user:chat_profiles(id, username, avatar_url)')
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -37,7 +38,7 @@ export function StatusProvider({ children }) {
 
     // Which of these have I already viewed?
     const { data: views } = await supabase
-      .from('status_views')
+      .from('chat_status_views')
       .select('status_id')
       .eq('viewer_id', user.id);
 
@@ -57,7 +58,7 @@ export function StatusProvider({ children }) {
     // aging past expiry, should refresh without a manual reload.
     const channel = supabase
       .channel(`statuses-${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'statuses' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_statuses' }, () => {
         loadStatuses();
       })
       .subscribe();
@@ -66,7 +67,7 @@ export function StatusProvider({ children }) {
   }, [user, loadStatuses]);
 
   async function postTextStatus(text, backgroundColor) {
-    const { error } = await supabase.from('statuses').insert({
+    const { error } = await supabase.from('chat_statuses').insert({
       user_id: user.id,
       content_type: 'text',
       text_content: text.trim(),
@@ -76,13 +77,14 @@ export function StatusProvider({ children }) {
     return { error };
   }
 
-  async function postImageStatus(file, caption) {
+  async function postImageStatus(rawFile, caption) {
+    const file = await compressImage(rawFile, { maxDim: 1280, quality: 0.82 });
     const path = `${user.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from('status-media').upload(path, file);
+    const { error: uploadError } = await supabase.storage.from('chat-status-media').upload(path, file);
     if (uploadError) return { error: uploadError };
 
-    const { data: pub } = supabase.storage.from('status-media').getPublicUrl(path);
-    const { error } = await supabase.from('statuses').insert({
+    const { data: pub } = supabase.storage.from('chat-status-media').getPublicUrl(path);
+    const { error } = await supabase.from('chat_statuses').insert({
       user_id: user.id,
       content_type: 'image',
       media_url: pub.publicUrl,
@@ -93,7 +95,7 @@ export function StatusProvider({ children }) {
   }
 
   async function deleteStatus(statusId) {
-    const { error } = await supabase.from('statuses').delete().eq('id', statusId);
+    const { error } = await supabase.from('chat_statuses').delete().eq('id', statusId);
     if (!error) loadStatuses();
     return { error };
   }
@@ -101,13 +103,13 @@ export function StatusProvider({ children }) {
   async function markViewed(statusId) {
     if (viewedIds.has(statusId)) return;
     setViewedIds((prev) => new Set(prev).add(statusId));
-    await supabase.from('status_views').insert({ status_id: statusId, viewer_id: user.id });
+    await supabase.from('chat_status_views').insert({ status_id: statusId, viewer_id: user.id });
   }
 
   async function getViewers(statusId) {
     const { data } = await supabase
-      .from('status_views')
-      .select('viewer_id, viewed_at, viewer:profiles(id, username, avatar_url)')
+      .from('chat_status_views')
+      .select('viewer_id, viewed_at, viewer:chat_profiles(id, username, avatar_url)')
       .eq('status_id', statusId)
       .order('viewed_at', { ascending: false });
     return data || [];

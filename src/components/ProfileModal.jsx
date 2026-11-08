@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import Avatar from './Avatar.jsx';
 import { PRESENCE_LABELS } from '../utils/format.js';
@@ -24,13 +25,14 @@ export default function ProfileModal({ onClose }) {
     : null;
 
   async function handleAvatarPick(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
     setBusy(true);
     setError('');
 
+    const file = await compressImage(picked, { maxDim: 512, quality: 0.85 });
     const path = `${user.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
+    const { error: uploadError } = await supabase.storage.from('chat-avatars').upload(path, file, {
       upsert: true,
     });
     if (uploadError) {
@@ -39,9 +41,9 @@ export default function ProfileModal({ onClose }) {
       return;
     }
 
-    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+    const { data: pub } = supabase.storage.from('chat-avatars').getPublicUrl(path);
     const { error: updateError } = await supabase
-      .from('profiles')
+      .from('chat_profiles')
       .update({ avatar_url: pub.publicUrl })
       .eq('id', user.id);
 
@@ -61,7 +63,7 @@ export default function ProfileModal({ onClose }) {
 
     setBusy(true);
     const { error } = await supabase
-      .from('profiles')
+      .from('chat_profiles')
       .update({
         username: trimmedUsername,
         status_message: statusMessage.trim() || null,

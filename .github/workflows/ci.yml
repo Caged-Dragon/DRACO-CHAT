@@ -1,0 +1,54 @@
+name: CI
+
+# Runs on every push and pull request: unit tests, production build,
+# layout/accessibility checks, feature tests, and the real-WebRTC call tests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VITE_SUPABASE_URL: https://mock.supabase.co
+      VITE_SUPABASE_ANON_KEY: mock
+      VITE_GIPHY_API_KEY: mock
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install browser for the UI tests
+        run: |
+          pip install playwright pillow
+          python -m playwright install --with-deps chromium
+
+      - name: Layout, accessibility and feature tests
+        run: |
+          python tests/ui/overlap.py
+          python tests/ui/a11y.py
+          python tests/ui/features.py
+
+      - name: Call tests (real WebRTC, fake devices)
+        run: |
+          node tests/call/build.mjs
+          python tests/call/call_e2e.py
+          python tests/call/group_e2e.py

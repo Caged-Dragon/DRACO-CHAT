@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStatus } from '../contexts/StatusContext.jsx';
 
-const BG_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#8b5cf6', '#ec4899', '#241a3d'];
+const BG_COLORS = ['#8a5a00', '#111111', '#b91c1c', '#c2410c', '#15803d', '#0e7490', '#6d28d9', '#be185d'];
 const MAX_STATUS_BYTES = 15 * 1024 * 1024;
 
 export default function AddStatusModal({ onClose }) {

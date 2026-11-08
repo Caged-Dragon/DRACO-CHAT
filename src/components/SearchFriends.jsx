@@ -35,7 +35,7 @@ export default function SearchFriends({ onRequestSent }) {
     const thisRequestId = ++requestIdRef.current;
 
     const { data, error } = await supabase
-      .from('profiles')
+      .from('chat_profiles')
       .select('id, username, avatar_url')
       .ilike('username', `%${term}%`)
       .neq('id', user.id)
@@ -53,7 +53,7 @@ export default function SearchFriends({ onRequestSent }) {
 
   async function sendRequest(addresseeId) {
     setMessage('');
-    const { error } = await supabase.from('friendships').insert([
+    const { error } = await supabase.from('chat_friendships').insert([
       { requester_id: user.id, addressee_id: addresseeId },
     ]);
 

@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '../utils/image.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
-import { THEME_TABS, DEFAULT_THEME } from '../theme/fields.js';
+import { THEME_TABS } from '../theme/fields.js';
 import AppPreviewMock from './AppPreviewMock.jsx';
 
 const DISAPPEAR_OPTIONS = [
@@ -23,7 +24,7 @@ export default function ChatThemeModal({
   onClose,
 }) {
   const { user } = useAuth();
-  const { theme: globalTheme, wallpaperUrl: globalWallpaper } = useTheme();
+  const { theme: globalTheme, defaults, wallpaperUrl: globalWallpaper } = useTheme();
   const [activeTab, setActiveTab] = useState(THEME_TABS[0].id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -32,7 +33,7 @@ export default function ChatThemeModal({
   const currentTab = THEME_TABS.find((t) => t.id === activeTab);
   // What the preview should actually show: this chat's override if
   // set, else the global theme's color, else the hard default.
-  const resolved = { ...DEFAULT_THEME, ...globalTheme, ...theme };
+  const resolved = { ...defaults, ...globalTheme, ...theme };
   const resolvedWallpaper = wallpaperUrl || globalWallpaper || null;
 
   async function saveTheme(nextTheme, nextWallpaperUrl) {
@@ -64,11 +65,12 @@ export default function ChatThemeModal({
   }
 
   async function handleWallpaperPick(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
     setBusy(true);
     setError('');
 
+    const file = await compressImage(picked, { maxDim: 1920, quality: 0.8 });
     const path = `${user.id}/chat-${friend.id}-${Date.now()}-${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('chat-wallpapers')

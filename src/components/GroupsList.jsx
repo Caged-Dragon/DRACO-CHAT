@@ -13,6 +13,7 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
   const [showCreate, setShowCreate] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuUp, setMenuUp] = useState(false);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -24,7 +25,7 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
       .channel(`group-members-${user.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'group_members' },
+        { event: '*', schema: 'public', table: 'chat_group_members' },
         (payload) => {
           const row = payload.new?.user_id ? payload.new : payload.old;
           if (row?.user_id === user.id) loadGroups();
@@ -46,8 +47,8 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
   async function loadGroups() {
     if (!user) return;
     const { data } = await supabase
-      .from('group_members')
-      .select('groups(id, name, avatar_url, created_by)')
+      .from('chat_group_members')
+      .select('groups:chat_groups(id, name, avatar_url, created_by)')
       .eq('user_id', user.id);
 
     setGroups((data || []).map((row) => row.groups).filter(Boolean));
@@ -80,6 +81,9 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
           className="friend-menu-btn"
           onClick={(e) => {
             e.stopPropagation();
+            // open upwards when there isn't room below the button
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuUp(window.innerHeight - rect.bottom < 260);
             setOpenMenuId(openMenuId === g.id ? null : g.id);
           }}
           aria-label="Group options"
@@ -87,7 +91,7 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
           ⋮
         </button>
         {openMenuId === g.id && (
-          <div className="friend-menu" onClick={(e) => e.stopPropagation()}>
+          <div className={`friend-menu${menuUp ? ' up' : ''}`} onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => {
                 setPref('g', g.id, { muted: !pref.muted });
@@ -113,7 +117,7 @@ export default function GroupsList({ activeGroupId, onSelectGroup, refreshKey })
   return (
     <div className="friends-list">
       <div className="groups-list-header">
-        <h3>Groups</h3>
+        <h2>Groups</h2>
         <button className="create-group-btn" onClick={() => setShowCreate(true)} aria-label="New group">
           +
         </button>

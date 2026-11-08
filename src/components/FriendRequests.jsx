@@ -16,7 +16,7 @@ export default function FriendRequests({ refreshKey, onChange }) {
       .channel(`friend-requests-${user.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'friendships' },
+        { event: '*', schema: 'public', table: 'chat_friendships' },
         (payload) => {
           const row = payload.new?.id ? payload.new : payload.old;
           if (row?.addressee_id === user.id) loadRequests();
@@ -39,8 +39,8 @@ export default function FriendRequests({ refreshKey, onChange }) {
     if (!user) return;
 
     const { data, error } = await supabase
-      .from('friendships')
-      .select('id, requester:profiles!friendships_requester_id_fkey(id, username)')
+      .from('chat_friendships')
+      .select('id, requester:chat_profiles!chat_friendships_requester_id_fkey(id, username)')
       .eq('addressee_id', user.id)
       .eq('status', 'pending');
 
@@ -53,7 +53,7 @@ export default function FriendRequests({ refreshKey, onChange }) {
 
   async function accept(id) {
     const { error } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .update({ status: 'accepted' })
       .eq('id', id);
     if (error) {
@@ -65,7 +65,7 @@ export default function FriendRequests({ refreshKey, onChange }) {
   }
 
   async function decline(id) {
-    const { error } = await supabase.from('friendships').delete().eq('id', id);
+    const { error } = await supabase.from('chat_friendships').delete().eq('id', id);
     if (error) {
       console.error(error);
       return;
@@ -78,7 +78,7 @@ export default function FriendRequests({ refreshKey, onChange }) {
 
   return (
     <div className="friend-requests">
-      <h3>Friend requests</h3>
+      <h2>Friend requests</h2>
       <ul>
         {requests.map((r) => (
           <li key={r.id}>

@@ -54,7 +54,7 @@ export function usePushNotifications() {
       });
 
       const json = sub.toJSON();
-      const { error } = await supabase.from('push_subscriptions').upsert(
+      const { error } = await supabase.from('chat_push_subscriptions').upsert(
         {
           user_id: user.id,
           endpoint: json.endpoint,
@@ -78,7 +78,7 @@ export function usePushNotifications() {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
-        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        await supabase.from('chat_push_subscriptions').delete().eq('endpoint', sub.endpoint);
         await sub.unsubscribe();
       }
       setSubscribed(false);
@@ -89,15 +89,4 @@ export function usePushNotifications() {
   }, []);
 
   return { supported, permission, subscribed, busy, error, enable, disable };
-}
-
-// Fire-and-forget: ask the edge function to push a notification to
-// `userId`. Safe to call even if the deployment hasn't set up push.
-export async function sendPushNotification(userId, title, body, url) {
-  try {
-    await supabase.functions.invoke('send-push', { body: { userId, title, body, url } });
-  } catch {
-    // Notifications are a nice-to-have — never let a failure here
-    // interrupt the actual message send.
-  }
 }

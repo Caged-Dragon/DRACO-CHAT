@@ -6,12 +6,17 @@ import { useUnread } from '../contexts/UnreadContext.jsx';
 import { useCall } from '../contexts/CallContext.jsx';
 import ChatThemeModal from './ChatThemeModal.jsx';
 import MessageBubble from './MessageBubble.jsx';
+import PendingBubble from './PendingBubble.jsx';
+import { sendViaOutbox } from '../utils/outbox.js';
+import { useOutbox } from '../hooks/useOutbox.js';
+import { compressImage } from '../utils/image.js';
+import { uploadToBucket, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, safeFileName, formatBytes } from '../utils/upload.js';
+import { useVoiceRecorder, extensionForMime, formatClock } from '../hooks/useVoiceRecorder.js';
 import Avatar from './Avatar.jsx';
 import GifPicker, { gifsEnabled } from './GifPicker.jsx';
 import ForwardModal from './ForwardModal.jsx';
 import { computeGradient } from '../theme/fields.js';
 import { QUICK_EMOJIS, formatLastSeen } from '../utils/format.js';
-import { useViewportWidth } from '../hooks/useViewportWidth.js';
 
 function sameId(a, b) {
   return (
@@ -21,7 +26,6 @@ function sameId(a, b) {
   );
 }
 
-const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15MB
 const TYPING_STOP_DELAY = 3000;
 const PAGE_SIZE = 50;
 
@@ -42,7 +46,10 @@ export default function ChatWindow({ friend, onBack }) {
   const [forwardingMessage, setForwardingMessage] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [friendTyping, setFriendTyping] = useState(false);
-  const [recording, setRecording] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadName, setUploadName] = useState('');
+  const uploadAbortRef = useRef(null);
+  const voice = useVoiceRecorder({ onComplete: sendVoiceMessage, onError: setAttachError });
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [disappearingSeconds, setDisappearingSeconds] = useState(0);
@@ -50,6 +57,8 @@ export default function ChatWindow({ friend, onBack }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [fetchedPinned, setFetchedPinned] = useState(null);
+  const outbox = useOutbox(user.id);
+  const pendingHere = outbox.filter((i) => i.table === 'chat_messages' && i.row.receiver_id === friend.id);
 
   // This chat's OWN theme overrides only — merged on top of the global
   // theme via inline CSS variables scoped to this component's root div.
@@ -63,8 +72,6 @@ export default function ChatWindow({ friend, onBack }) {
   const chatChannelRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const friendTypingTimeoutRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const recordedChunksRef = useRef([]);
 
   useEffect(() => {
     loadMessages();
@@ -75,21 +82,21 @@ export default function ChatWindow({ friend, onBack }) {
       .channel(`chat-${[user.id, friend.id].sort().join('-')}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
+        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
         (payload) => {
           const m = payload.new;
           const belongsHere =
             (sameId(m.sender_id, user.id) && sameId(m.receiver_id, friend.id)) ||
             (sameId(m.sender_id, friend.id) && sameId(m.receiver_id, user.id));
           if (belongsHere) {
-            setMessages((prev) => [...prev, m]);
+            setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
             if (sameId(m.sender_id, friend.id)) markRead(friend.id);
           }
         }
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
+        { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
         (payload) => {
           const m = payload.new;
           const belongsHere =
@@ -131,7 +138,7 @@ export default function ChatWindow({ friend, onBack }) {
       return;
     }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, pendingHere.length]);
 
   // Server-side search across the whole conversation (not just loaded messages)
   useEffect(() => {
@@ -143,7 +150,7 @@ export default function ChatWindow({ friend, onBack }) {
     const timer = setTimeout(async () => {
       const safe = q.replace(/[\\%_]/g, (c) => `\\${c}`);
       const { data } = await supabase
-        .from('messages')
+        .from('chat_messages')
         .select('*')
         .or(
           `and(sender_id.eq.${user.id},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${user.id})`
@@ -162,7 +169,7 @@ export default function ChatWindow({ friend, onBack }) {
   async function loadMessages() {
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
-      .from('messages')
+      .from('chat_messages')
       .select('*')
       .or(
         `and(sender_id.eq.${user.id},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${user.id})`
@@ -182,7 +189,7 @@ export default function ChatWindow({ friend, onBack }) {
 
     // The pinned banner should survive even if the pin is older than the first page
     const { data: pinned } = await supabase
-      .from('messages')
+      .from('chat_messages')
       .select('*')
       .or(
         `and(sender_id.eq.${user.id},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${user.id})`
@@ -199,7 +206,7 @@ export default function ChatWindow({ friend, onBack }) {
     if (loadingOlder || messages.length === 0) return;
     setLoadingOlder(true);
     const { data, error } = await supabase
-      .from('messages')
+      .from('chat_messages')
       .select('*')
       .or(
         `and(sender_id.eq.${user.id},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${user.id})`
@@ -216,7 +223,7 @@ export default function ChatWindow({ friend, onBack }) {
       setHasMore(data.length === PAGE_SIZE);
       if (older.length) {
         const { data: rx } = await supabase
-          .from('message_reactions')
+          .from('chat_message_reactions')
           .select('*')
           .in('message_id', older.map((m) => m.id));
         if (rx?.length) {
@@ -235,7 +242,7 @@ export default function ChatWindow({ friend, onBack }) {
 
   async function loadReactions(messageIds) {
     const { data } = await supabase
-      .from('message_reactions')
+      .from('chat_message_reactions')
       .select('*')
       .in('message_id', messageIds);
 
@@ -250,7 +257,7 @@ export default function ChatWindow({ friend, onBack }) {
     const idSet = new Set(messageIds);
     const channel = supabase
       .channel(`reactions-${[user.id, friend.id].sort().join('-')}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_message_reactions' }, (payload) => {
         const row = payload.new || payload.old;
         if (!idSet.has(row.message_id) && !messages.find((m) => m.id === row.message_id)) return;
         setReactionsByMessage((prev) => {
@@ -321,56 +328,80 @@ export default function ChatWindow({ friend, onBack }) {
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
 
-    const { error } = await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: friend.id,
-      content,
-      reply_to_id: replyingTo?.id ?? null,
-      expires_at: expiresAt,
-    });
-
-    if (error) setAttachError(error.message);
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_messages',
+      {
+        sender_id: user.id,
+        receiver_id: friend.id,
+        content,
+        reply_to_id: replyingTo?.id ?? null,
+        expires_at: expiresAt,
+      },
+      content
+    );
   }
 
   async function handleAttachmentPick(e) {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setAttachError('File is too large (max 15MB).');
-      return;
-    }
+    if (!picked) return;
 
     setAttachError('');
     setUploading(true);
+    // Photos are shrunk before upload (faster, less data); other files go as-is
+    const file = await compressImage(picked, { maxDim: 1600, quality: 0.82 });
 
-    const path = `${user.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from('chat-attachments').upload(path, file);
-
-    if (uploadError) {
-      setAttachError(uploadError.message);
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachError(`That file is ${formatBytes(file.size)}. The limit is ${MAX_ATTACHMENT_LABEL}.`);
       setUploading(false);
       return;
     }
 
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    setUploadName(file.name);
+    setUploadPct(0);
+    const path = `${user.id}/${Date.now()}-${safeFileName(file.name)}`;
+    const { error: uploadError } = await uploadToBucket({
+      bucket: 'chat-attachments',
+      path,
+      file,
+      onProgress: setUploadPct,
+      signal: controller.signal,
+    });
+    uploadAbortRef.current = null;
+
+    if (uploadError) {
+      if (!uploadError.cancelled) setAttachError(uploadError.message);
+      setUploading(false);
+      setUploadName('');
+      return;
+    }
+
     const { data: pub } = supabase.storage.from('chat-attachments').getPublicUrl(path);
-    const attachmentType = file.type.startsWith('image/') ? 'image' : 'file';
+    const attachmentType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file';
     const expiresAt = disappearingSeconds
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
 
-    const { error: insertError } = await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: friend.id,
-      attachment_url: pub.publicUrl,
-      attachment_type: attachmentType,
-      attachment_name: file.name,
-      expires_at: expiresAt,
-    });
-
-    if (insertError) setAttachError(insertError.message);
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_messages',
+      {
+        sender_id: user.id,
+        receiver_id: friend.id,
+        attachment_url: pub.publicUrl,
+        attachment_type: attachmentType,
+        attachment_name: file.name,
+        expires_at: expiresAt,
+      },
+      attachmentType === 'image' ? '📷 Photo' : attachmentType === 'video' ? '🎬 Video' : `📎 ${file.name}`
+    );
     setUploading(false);
+    setUploadName('');
   }
 
   async function handleGifSelect(url) {
@@ -378,65 +409,51 @@ export default function ChatWindow({ friend, onBack }) {
     const expiresAt = disappearingSeconds
       ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
       : null;
-    const { error } = await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: friend.id,
-      attachment_url: url,
-      attachment_type: 'gif',
-      attachment_name: 'GIF',
-      expires_at: expiresAt,
-    });
-    if (error) setAttachError(error.message);
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_messages',
+      {
+        sender_id: user.id,
+        receiver_id: friend.id,
+        attachment_url: url,
+        attachment_type: 'gif',
+        attachment_name: 'GIF',
+        expires_at: expiresAt,
+      },
+      'GIF'
+    );
   }
 
-  async function toggleRecording() {
-    if (recording) {
-      mediaRecorderRef.current?.stop();
-      setRecording(false);
+  async function sendVoiceMessage({ blob, mime, duration }) {
+    setAttachError('');
+    setUploading(true);
+    const path = `${user.id}/${Date.now()}-voice-message.${extensionForMime(mime)}`;
+    const { error: uploadError } = await uploadToBucket({ bucket: 'chat-attachments', path, file: blob, contentType: mime });
+    if (uploadError) {
+      setAttachError(uploadError.message);
+      setUploading(false);
       return;
     }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recordedChunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-        if (blob.size === 0) return;
-
-        setUploading(true);
-        const path = `${user.id}/${Date.now()}-voice-message.webm`;
-        const { error: uploadError } = await supabase.storage
-          .from('chat-attachments')
-          .upload(path, blob, { contentType: 'audio/webm' });
-
-        if (uploadError) {
-          setAttachError(uploadError.message);
-          setUploading(false);
-          return;
-        }
-
-        const { data: pub } = supabase.storage.from('chat-attachments').getPublicUrl(path);
-        await supabase.from('messages').insert({
-          sender_id: user.id,
-          receiver_id: friend.id,
-          attachment_url: pub.publicUrl,
-          attachment_type: 'audio',
-          attachment_name: 'Voice message',
-        });
-        setUploading(false);
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch {
-      setAttachError('Could not access microphone.');
-    }
+    const { data: pub } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+    const expiresAt = disappearingSeconds
+      ? new Date(Date.now() + disappearingSeconds * 1000).toISOString()
+      : null;
+    await sendViaOutbox(
+      supabase,
+      user.id,
+      'chat_messages',
+      {
+        sender_id: user.id,
+        receiver_id: friend.id,
+        attachment_url: pub.publicUrl,
+        attachment_type: 'audio',
+        attachment_name: `Voice message (${duration}s)`,
+        expires_at: expiresAt,
+      },
+      '🎙️ Voice message'
+    );
+    setUploading(false);
   }
 
   async function handleReact(messageId, emoji) {
@@ -444,26 +461,26 @@ export default function ChatWindow({ friend, onBack }) {
       (r) => r.user_id === user.id && r.emoji === emoji
     );
     if (existing) {
-      await supabase.from('message_reactions').delete().eq('id', existing.id);
+      await supabase.from('chat_message_reactions').delete().eq('id', existing.id);
     } else {
-      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
+      await supabase.from('chat_message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
     }
   }
 
   async function handleEditMessage(messageId, newContent) {
     await supabase
-      .from('messages')
+      .from('chat_messages')
       .update({ content: newContent, edited_at: new Date().toISOString() })
       .eq('id', messageId);
   }
 
   async function handleDeleteMessage(messageId) {
-    await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
+    await supabase.from('chat_messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
   }
 
   async function handleTogglePin(message) {
     await supabase
-      .from('messages')
+      .from('chat_messages')
       .update({ pinned_at: message.pinned_at ? null : new Date().toISOString() })
       .eq('id', message.id);
   }
@@ -489,65 +506,15 @@ export default function ChatWindow({ friend, onBack }) {
 
   const online = isOnline(friend.id);
 
-  // --------------------------------------------------------
-  // DYNAMIC SIZING — measured from the real viewport width, not
-  // just CSS breakpoints. Inline styles always win over anything
-  // in the stylesheet, so this guarantees the header and input
-  // row fit the screen no matter what state styles.css is in.
-  // --------------------------------------------------------
-  const viewportWidth = useViewportWidth();
-  const isSmall = viewportWidth <= 400;
-  const isMobile = viewportWidth <= 640;
-
-  const headerStyle = isMobile
-    ? { padding: isSmall ? '8px 10px' : '10px 14px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-
-  const iconBtnStyle = isMobile
-    ? { fontSize: isSmall ? 13 : 15, padding: '4px 2px', flexShrink: 0 }
-    : undefined;
-
-  const nameWrapStyle = isMobile
-    ? { minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }
-    : undefined;
-
-  const nameTextStyle = isMobile
-    ? {
-        fontSize: isSmall ? 13 : 14,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }
-    : undefined;
-
-  const inputRowStyle = isMobile
-    ? { padding: isSmall ? '8px' : '10px 12px', gap: isSmall ? '4px' : '6px' }
-    : undefined;
-
-  const textInputStyle = { flex: '1 1 auto', minWidth: 0 };
-
-  const sendBtnStyle = isMobile
-    ? {
-        padding: isSmall ? '8px 12px' : '9px 16px',
-        fontSize: isSmall ? 13 : 14,
-        flexShrink: 0,
-        whiteSpace: 'nowrap',
-      }
-    : { flexShrink: 0 };
-
-  const attachIconStyle = isMobile
-    ? { fontSize: isSmall ? 16 : 18, flexShrink: 0 }
-    : { flexShrink: 0 };
-
   return (
     <div className="chat-window" style={scopedStyle}>
-      <div className="chat-header" style={headerStyle}>
-        <button className="back-btn" onClick={onBack} aria-label="Back to friends list" style={iconBtnStyle}>
+      <div className="chat-header">
+        <button className="back-btn" onClick={onBack} aria-label="Back to friends list">
           ←
         </button>
-        <Avatar url={friend.avatar_url} name={friend.username} size={isSmall ? 26 : 30} online={online} showStatusDot />
-        <div className="chat-header-name" style={nameWrapStyle}>
-          <div style={nameTextStyle}>{friend.username}</div>
+        <Avatar url={friend.avatar_url} name={friend.username} size={32} online={online} showStatusDot />
+        <div className="chat-header-name">
+          <div>{friend.username}</div>
           <div className="chat-header-sub">
             {friendTyping
               ? 'typing...'
@@ -558,7 +525,7 @@ export default function ChatWindow({ friend, onBack }) {
               : ''}
           </div>
         </div>
-        <button className="chat-settings-btn" onClick={() => setSearchOpen((s) => !s)} aria-label="Search" style={iconBtnStyle}>
+        <button className="chat-settings-btn" onClick={() => setSearchOpen((s) => !s)} aria-label="Search">
           🔍
         </button>
         <button
@@ -567,7 +534,7 @@ export default function ChatWindow({ friend, onBack }) {
           disabled={callState !== 'idle'}
           aria-label="Voice call"
           title="Voice call"
-          style={iconBtnStyle}
+         
         >
           📞
         </button>
@@ -577,7 +544,7 @@ export default function ChatWindow({ friend, onBack }) {
           disabled={callState !== 'idle'}
           aria-label="Video call"
           title="Video call"
-          style={iconBtnStyle}
+         
         >
           🎥
         </button>
@@ -585,7 +552,7 @@ export default function ChatWindow({ friend, onBack }) {
           className="chat-settings-btn"
           onClick={() => setShowThemeModal(true)}
           aria-label="Chat settings"
-          style={iconBtnStyle}
+         
         >
           🎨
         </button>
@@ -613,7 +580,7 @@ export default function ChatWindow({ friend, onBack }) {
 
       {pinnedMessage && (
         <div className="pinned-banner">
-          📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}
+          <span className="pinned-text">📌 {pinnedMessage.content || pinnedMessage.attachment_name || 'Pinned message'}</span>
           <button onClick={() => handleTogglePin(pinnedMessage)}>Unpin</button>
         </div>
       )}
@@ -647,10 +614,22 @@ export default function ChatWindow({ friend, onBack }) {
             />
           );
         })}
+        {!searching && pendingHere.map((p) => <PendingBubble key={p.id} item={p} userId={user.id} />)}
         <div ref={bottomRef} />
       </div>
 
       {attachError && <p className="error-text attach-error">{attachError}</p>}
+
+      {uploading && uploadName && (
+        <div className="upload-progress" role="status" aria-live="polite">
+          <div className="upload-progress-info">
+            <span className="upload-progress-name">{uploadName}</span>
+            <span className="upload-progress-pct">{uploadPct}%</span>
+          </div>
+          <div className="upload-progress-bar"><span style={{ width: `${uploadPct}%` }} /></div>
+          <button type="button" className="upload-progress-cancel" onClick={() => uploadAbortRef.current?.abort()} aria-label="Cancel upload">✕</button>
+        </div>
+      )}
 
       {replyingTo && (
         <div className="reply-preview">
@@ -664,23 +643,33 @@ export default function ChatWindow({ friend, onBack }) {
         </div>
       )}
 
-      <form className="chat-input" onSubmit={sendMessage} style={inputRowStyle}>
+      <form className="chat-input" onSubmit={sendMessage}>
+        {voice.recording ? (
+          <div className="voice-recording-bar" role="status" aria-live="polite">
+            <button type="button" className="voice-rec-cancel" onClick={voice.cancel} aria-label="Cancel recording">🗑️</button>
+            <span className="voice-rec-dot" aria-hidden="true" />
+            <span className="voice-rec-time">{formatClock(voice.seconds)}</span>
+            <span className="voice-rec-hint">Recording…</span>
+            <button type="button" className="voice-rec-send" onClick={voice.stop} aria-label="Send voice message">Send ➤</button>
+          </div>
+        ) : (
+          <>
         <button
           type="button"
           className="attach-btn"
           onClick={() => setShowEmojiPicker((s) => !s)}
           aria-label="Emoji"
-          style={attachIconStyle}
+         
         >
           😊
         </button>
         {gifsEnabled && (
         <button
           type="button"
-          className="attach-btn"
+          className="attach-btn gif-btn"
           onClick={() => setShowGifPicker((s) => !s)}
           aria-label="Send GIF"
-          style={attachIconStyle}
+         
         >
           GIF
         </button>
@@ -691,23 +680,18 @@ export default function ChatWindow({ friend, onBack }) {
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
           aria-label="Attach image or document"
-          style={attachIconStyle}
+         
         >
           {uploading ? '…' : '📎'}
         </button>
-        <button
-          type="button"
-          className={`attach-btn ${recording ? 'recording' : ''}`}
-          onClick={toggleRecording}
-          aria-label="Record voice message"
-          style={attachIconStyle}
-        >
-          {recording ? '⏹' : '🎙️'}
-        </button>
+        {voice.supported && (
+          <button type="button" className="attach-btn" onClick={voice.start} disabled={uploading} aria-label="Record voice message">
+            🎙️
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,application/pdf,.doc,.docx,.txt,.zip"
           onChange={handleAttachmentPick}
           hidden
         />
@@ -716,11 +700,13 @@ export default function ChatWindow({ friend, onBack }) {
           placeholder="Type a message..."
           value={text}
           onChange={handleTextChange}
-          style={textInputStyle}
+         
         />
-        <button type="submit" style={sendBtnStyle}>
+        <button type="submit">
           Send
         </button>
+          </>
+        )}
       </form>
 
       {showEmojiPicker && (

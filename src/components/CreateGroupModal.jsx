@@ -17,12 +17,12 @@ export default function CreateGroupModal({ onClose, onCreated }) {
 
   async function loadFriends() {
     const { data } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .select(
         `
         requester_id, addressee_id,
-        requester:profiles!friendships_requester_id_fkey(id, username),
-        addressee:profiles!friendships_addressee_id_fkey(id, username)
+        requester:chat_profiles!chat_friendships_requester_id_fkey(id, username),
+        addressee:chat_profiles!chat_friendships_addressee_id_fkey(id, username)
       `
       )
       .eq('status', 'accepted')
@@ -57,7 +57,7 @@ export default function CreateGroupModal({ onClose, onCreated }) {
     setError('');
 
     const { data: group, error: groupError } = await supabase
-      .from('groups')
+      .from('chat_groups')
       .insert({ name: name.trim(), created_by: user.id })
       .select()
       .single();
@@ -69,7 +69,7 @@ export default function CreateGroupModal({ onClose, onCreated }) {
     }
 
     const members = [user.id, ...selected].map((uid) => ({ group_id: group.id, user_id: uid }));
-    const { error: memberError } = await supabase.from('group_members').insert(members);
+    const { error: memberError } = await supabase.from('chat_group_members').insert(members);
 
     if (memberError) {
       setError(memberError.message);

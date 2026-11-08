@@ -39,12 +39,12 @@ export function PresenceProvider({ children }) {
     // stays meaningful even between presence syncs.
     const heartbeat = setInterval(() => {
       supabase
-        .from('profiles')
+        .from('chat_profiles')
         .update({ last_seen_at: new Date().toISOString() })
         .eq('id', user.id)
         .then(() => {});
     }, HEARTBEAT_MS);
-    supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', user.id).then(() => {});
+    supabase.from('chat_profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', user.id).then(() => {});
 
     return () => {
       clearInterval(heartbeat);

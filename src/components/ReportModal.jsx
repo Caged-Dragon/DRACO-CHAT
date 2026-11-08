@@ -18,7 +18,7 @@ export default function ReportModal({ targetUser, onClose }) {
     setBusy(true);
     setError('');
 
-    const { error } = await supabase.from('reports').insert({
+    const { error } = await supabase.from('chat_reports').insert({
       reporter_id: user.id,
       reported_id: targetUser.id,
       reason: reason.trim(),

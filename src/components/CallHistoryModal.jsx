@@ -18,12 +18,12 @@ export default function CallHistoryModal({ onClose }) {
 
   async function load() {
     const { data } = await supabase
-      .from('calls')
+      .from('chat_calls')
       .select(
         `
         id, call_type, status, duration_seconds, created_at, caller_id, callee_id,
-        caller:profiles!calls_caller_id_fkey(id, username, avatar_url),
-        callee:profiles!calls_callee_id_fkey(id, username, avatar_url)
+        caller:chat_profiles!chat_calls_caller_id_fkey(id, username, avatar_url),
+        callee:chat_profiles!chat_calls_callee_id_fkey(id, username, avatar_url)
       `
       )
       .order('created_at', { ascending: false })

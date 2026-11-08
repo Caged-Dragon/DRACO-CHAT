@@ -17,6 +17,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
   const [friends, setFriends] = useState([]);
   const [blockedIds, setBlockedIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuUp, setMenuUp] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
       .channel(`friendships-${user.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'friendships' },
+        { event: '*', schema: 'public', table: 'chat_friendships' },
         (payload) => {
           const row = payload.new?.id ? payload.new : payload.old;
           if (row?.requester_id === user.id || row?.addressee_id === user.id) {
@@ -58,13 +59,13 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
     // An accepted friendship can have the current user as either
     // the original requester or the addressee who accepted it.
     const { data, error } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .select(
         `
         requester_id,
         addressee_id,
-        requester:profiles!friendships_requester_id_fkey(id, username, avatar_url, status_message, last_seen_at),
-        addressee:profiles!friendships_addressee_id_fkey(id, username, avatar_url, status_message, last_seen_at)
+        requester:chat_profiles!chat_friendships_requester_id_fkey(id, username, avatar_url, status_message, last_seen_at),
+        addressee:chat_profiles!chat_friendships_addressee_id_fkey(id, username, avatar_url, status_message, last_seen_at)
       `
       )
       .eq('status', 'accepted')
@@ -84,7 +85,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
   async function loadBlocks() {
     if (!user) return;
     const { data } = await supabase
-      .from('blocks')
+      .from('chat_blocks')
       .select('blocker_id, blocked_id')
       .or(`blocker_id.eq.${user.id},blocked_id.eq.${user.id}`);
 
@@ -97,7 +98,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
 
   async function handleUnfriend(friend) {
     await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .delete()
       .or(
         `and(requester_id.eq.${user.id},addressee_id.eq.${friend.id}),and(requester_id.eq.${friend.id},addressee_id.eq.${user.id})`
@@ -107,13 +108,13 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
   }
 
   async function handleBlock(friend) {
-    await supabase.from('blocks').insert({ blocker_id: user.id, blocked_id: friend.id });
+    await supabase.from('chat_blocks').insert({ blocker_id: user.id, blocked_id: friend.id });
     setOpenMenuId(null);
     loadBlocks();
   }
 
   async function handleUnblock(friend) {
-    await supabase.from('blocks').delete().eq('blocker_id', user.id).eq('blocked_id', friend.id);
+    await supabase.from('chat_blocks').delete().eq('blocker_id', user.id).eq('blocked_id', friend.id);
     setOpenMenuId(null);
     loadBlocks();
   }
@@ -147,6 +148,9 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
           className="friend-menu-btn"
           onClick={(e) => {
             e.stopPropagation();
+            // open upwards when there isn't room below the button
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuUp(window.innerHeight - rect.bottom < 260);
             setOpenMenuId(openMenuId === f.id ? null : f.id);
           }}
           aria-label="Friend options"
@@ -154,7 +158,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
           ⋮
         </button>
         {openMenuId === f.id && (
-          <div className="friend-menu" onClick={(e) => e.stopPropagation()}>
+          <div className={`friend-menu${menuUp ? ' up' : ''}`} onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => {
                 setPref('f', f.id, { muted: !pref.muted });
@@ -191,7 +195,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
 
   return (
     <div className="friends-list">
-      <h3>Friends</h3>
+      <h2>Friends</h2>
       {visibleFriends.length === 0 && <p className="dim small">No friends yet. Search above.</p>}
       <ul>{activeFriends.map(renderRow)}</ul>
 
@@ -207,7 +211,7 @@ export default function FriendsList({ refreshKey, activeFriendId, onSelectFriend
 
       {blockedIds.size > 0 && (
         <div className="blocked-section">
-          <h3>Blocked</h3>
+          <h2>Blocked</h2>
           <ul>
             {friends
               .filter((f) => blockedIds.has(f.id))

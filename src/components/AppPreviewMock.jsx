@@ -24,7 +24,7 @@ export default function AppPreviewMock({ values, wallpaperUrl }) {
               fontSize: 12,
             }}
           >
-            🐉 Dragon Chat
+            <img src="/logo.png" alt="" className="app-preview-logo" /> Dragon Chat
           </span>
         </div>
         <div

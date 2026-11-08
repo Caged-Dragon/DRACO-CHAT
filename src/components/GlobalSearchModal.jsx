@@ -28,12 +28,12 @@ export default function GlobalSearchModal({ onClose, onOpenFriend, onOpenGroup }
 
   async function runSearch(term) {
     const { data: friendRows } = await supabase
-      .from('friendships')
+      .from('chat_friendships')
       .select(
         `
         requester_id, addressee_id,
-        requester:profiles!friendships_requester_id_fkey(id, username, avatar_url),
-        addressee:profiles!friendships_addressee_id_fkey(id, username, avatar_url)
+        requester:chat_profiles!chat_friendships_requester_id_fkey(id, username, avatar_url),
+        addressee:chat_profiles!chat_friendships_addressee_id_fkey(id, username, avatar_url)
       `
       )
       .eq('status', 'accepted')
@@ -45,14 +45,14 @@ export default function GlobalSearchModal({ onClose, onOpenFriend, onOpenGroup }
     setFriends(allFriends.filter((f) => f.username.toLowerCase().includes(term.toLowerCase())));
 
     const { data: groupRows } = await supabase
-      .from('group_members')
-      .select('groups(id, name)')
+      .from('chat_group_members')
+      .select('groups:chat_groups(id, name)')
       .eq('user_id', user.id);
     const allGroups = (groupRows || []).map((r) => r.groups).filter(Boolean);
     setGroups(allGroups.filter((g) => g.name.toLowerCase().includes(term.toLowerCase())));
 
     const { data: msgRows } = await supabase
-      .from('messages')
+      .from('chat_messages')
       .select('id, content, sender_id, receiver_id, created_at')
       .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
       .ilike('content', `%${term}%`)
